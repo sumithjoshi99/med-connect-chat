@@ -9,7 +9,113 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      [_ in never]: never
+      channel_connections: {
+        Row: {
+          channel: string
+          configuration: Json | null
+          created_at: string
+          id: string
+          is_active: boolean | null
+          updated_at: string
+        }
+        Insert: {
+          channel: string
+          configuration?: Json | null
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          updated_at?: string
+        }
+        Update: {
+          channel?: string
+          configuration?: Json | null
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      messages: {
+        Row: {
+          channel: string
+          content: string
+          created_at: string
+          direction: string
+          external_id: string | null
+          id: string
+          metadata: Json | null
+          patient_id: string
+          sender_name: string | null
+          status: string | null
+        }
+        Insert: {
+          channel: string
+          content: string
+          created_at?: string
+          direction: string
+          external_id?: string | null
+          id?: string
+          metadata?: Json | null
+          patient_id: string
+          sender_name?: string | null
+          status?: string | null
+        }
+        Update: {
+          channel?: string
+          content?: string
+          created_at?: string
+          direction?: string
+          external_id?: string | null
+          id?: string
+          metadata?: Json | null
+          patient_id?: string
+          sender_name?: string | null
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_patient_id_fkey"
+            columns: ["patient_id"]
+            isOneToOne: false
+            referencedRelation: "patients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      patients: {
+        Row: {
+          created_at: string
+          email: string | null
+          id: string
+          name: string
+          phone: string | null
+          preferred_channel: string | null
+          status: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          email?: string | null
+          id?: string
+          name: string
+          phone?: string | null
+          preferred_channel?: string | null
+          status?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string | null
+          id?: string
+          name?: string
+          phone?: string | null
+          preferred_channel?: string | null
+          status?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

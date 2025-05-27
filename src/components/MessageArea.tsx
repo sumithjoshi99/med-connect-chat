@@ -1,62 +1,42 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Send, Paperclip, Smile, Phone, Video } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
-// Mock message data
-const mockMessages = [
-  {
-    id: 1,
-    senderId: "pharmacy",
-    senderName: "PharmaCare",
-    content: "Hello Sarah! Your prescription for Lisinopril is ready for pickup. Would you like to schedule a pickup time?",
-    timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000),
-    channel: "sms",
-    status: "delivered"
-  },
-  {
-    id: 2,
-    senderId: "P001",
-    senderName: "Sarah Johnson",
-    content: "Hi! Yes, I can pick it up tomorrow afternoon. What time do you close?",
-    timestamp: new Date(Date.now() - 1.5 * 60 * 60 * 1000),
-    channel: "sms",
-    status: "read"
-  },
-  {
-    id: 3,
-    senderId: "pharmacy",
-    senderName: "PharmaCare",
-    content: "We close at 8 PM. You can pick it up anytime before then. Do you have any questions about the medication?",
-    timestamp: new Date(Date.now() - 1 * 60 * 60 * 1000),
-    channel: "sms",
-    status: "delivered"
-  },
-  {
-    id: 4,
-    senderId: "P001",
-    senderName: "Sarah Johnson",
-    content: "Thank you for the prescription reminder",
-    timestamp: new Date(Date.now() - 30 * 60 * 1000),
-    channel: "sms",
-    status: "read"
-  }
-];
+interface Message {
+  id: string;
+  patient_id: string;
+  channel: string;
+  direction: 'inbound' | 'outbound';
+  content: string;
+  status: string;
+  sender_name: string | null;
+  created_at: string;
+}
+
+interface Patient {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  preferred_channel: string;
+}
 
 interface MessageAreaProps {
-  patient: any;
+  patient: Patient;
   channel: string;
 }
 
 export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
-  const [messages, setMessages] = useState(mockMessages);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -65,8 +45,60 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
   };
 
   useEffect(() => {
+    if (patient?.id) {
+      fetchMessages();
+      subscribeToMessages();
+    }
+  }, [patient?.id]);
+
+  useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  const fetchMessages = async () => {
+    try {
+      setLoadingMessages(true);
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('patient_id', patient.id)
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+      setMessages(data || []);
+    } catch (error) {
+      console.error('Error fetching messages:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load messages",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingMessages(false);
+    }
+  };
+
+  const subscribeToMessages = () => {
+    const channel_subscription = supabase
+      .channel('messages-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `patient_id=eq.${patient.id}`
+        },
+        (payload) => {
+          setMessages(prev => [...prev, payload.new as Message]);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel_subscription);
+    };
+  };
 
   const handleSendMessage = async () => {
     if (!newMessage.trim()) return;
@@ -74,34 +106,40 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
     setIsLoading(true);
     console.log(`Sending ${channel} message to ${patient.name}: ${newMessage}`);
 
-    // Simulate API call
-    const message = {
-      id: messages.length + 1,
-      senderId: "pharmacy",
-      senderName: "PharmaCare",
-      content: newMessage,
-      timestamp: new Date(),
-      channel: channel,
-      status: "sending"
-    };
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .insert({
+          patient_id: patient.id,
+          channel: channel,
+          direction: 'outbound',
+          content: newMessage,
+          sender_name: 'PharmaCare',
+          status: 'sent'
+        });
 
-    setMessages(prev => [...prev, message]);
-    setNewMessage("");
+      if (error) throw error;
 
-    // Simulate delivery
-    setTimeout(() => {
-      setMessages(prev => 
-        prev.map(msg => 
-          msg.id === message.id ? { ...msg, status: "delivered" } : msg
-        )
-      );
-      setIsLoading(false);
+      setNewMessage("");
       
       toast({
         title: "Message sent",
         description: `${channel.toUpperCase()} message sent to ${patient.name}`,
       });
-    }, 1000);
+
+      // Here you would integrate with actual messaging services
+      // sendViaExternalService(channel, patient, newMessage);
+      
+    } catch (error) {
+      console.error('Error sending message:', error);
+      toast({
+        title: "Error",
+        description: "Failed to send message",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -117,12 +155,24 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
         return 'bg-green-100 text-green-800';
       case 'email':
         return 'bg-blue-100 text-blue-800';
-      case 'phone':
-        return 'bg-purple-100 text-purple-800';
+      case 'whatsapp':
+        return 'bg-green-100 text-green-800';
+      case 'facebook':
+        return 'bg-blue-100 text-blue-800';
+      case 'instagram':
+        return 'bg-pink-100 text-pink-800';
       default:
         return 'bg-gray-100 text-gray-800';
     }
   };
+
+  if (loadingMessages) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-gray-500">Loading messages...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -134,9 +184,11 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
               Communicating via {channel.toUpperCase()}
             </h4>
             <p className="text-sm text-blue-700">
-              {channel === 'sms' && `Phone: ${patient.phone}`}
-              {channel === 'email' && `Email: ${patient.email}`}
-              {channel === 'phone' && `Phone: ${patient.phone}`}
+              {channel === 'sms' && patient.phone && `Phone: ${patient.phone}`}
+              {channel === 'email' && patient.email && `Email: ${patient.email}`}
+              {channel === 'whatsapp' && patient.phone && `WhatsApp: ${patient.phone}`}
+              {channel === 'facebook' && 'Facebook Messenger'}
+              {channel === 'instagram' && 'Instagram Direct'}
             </p>
           </div>
           <div className="flex space-x-2">
@@ -157,18 +209,18 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
         {messages.map((message) => (
           <div
             key={message.id}
-            className={`flex ${message.senderId === 'pharmacy' ? 'justify-end' : 'justify-start'}`}
+            className={`flex ${message.direction === 'outbound' ? 'justify-end' : 'justify-start'}`}
           >
             <div
               className={`max-w-[70%] ${
-                message.senderId === 'pharmacy'
+                message.direction === 'outbound'
                   ? 'bg-blue-600 text-white'
                   : 'bg-white border border-gray-200 text-gray-900'
               } rounded-lg p-3 shadow-sm`}
             >
               <div className="flex items-center justify-between mb-1">
                 <span className="text-xs font-medium">
-                  {message.senderName}
+                  {message.sender_name || (message.direction === 'outbound' ? 'PharmaCare' : patient.name)}
                 </span>
                 <Badge 
                   className={`text-xs ${getChannelBadgeColor(message.channel)}`}
@@ -179,18 +231,15 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
               <p className="text-sm mb-2">{message.content}</p>
               <div className="flex items-center justify-between">
                 <span className={`text-xs ${
-                  message.senderId === 'pharmacy' ? 'text-blue-100' : 'text-gray-500'
+                  message.direction === 'outbound' ? 'text-blue-100' : 'text-gray-500'
                 }`}>
-                  {message.timestamp.toLocaleTimeString([], { 
+                  {new Date(message.created_at).toLocaleTimeString([], { 
                     hour: '2-digit', 
                     minute: '2-digit' 
                   })}
                 </span>
-                {message.senderId === 'pharmacy' && (
-                  <span className={`text-xs ${
-                    message.status === 'delivered' ? 'text-blue-100' : 
-                    message.status === 'sending' ? 'text-blue-200' : 'text-blue-100'
-                  }`}>
+                {message.direction === 'outbound' && (
+                  <span className={`text-xs text-blue-100`}>
                     {message.status}
                   </span>
                 )}

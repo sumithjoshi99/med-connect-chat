@@ -18,6 +18,9 @@ export const ChannelSelector = ({ selectedChannel, onChannelChange }: ChannelSel
   const channels = [
     { id: 'sms', name: 'SMS', icon: MessageSquare, color: 'bg-green-100 text-green-800' },
     { id: 'email', name: 'Email', icon: Mail, color: 'bg-blue-100 text-blue-800' },
+    { id: 'whatsapp', name: 'WhatsApp', icon: MessageSquare, color: 'bg-green-100 text-green-800' },
+    { id: 'facebook', name: 'Facebook', icon: MessageSquare, color: 'bg-blue-100 text-blue-800' },
+    { id: 'instagram', name: 'Instagram', icon: MessageSquare, color: 'bg-pink-100 text-pink-800' },
     { id: 'phone', name: 'Phone', icon: Phone, color: 'bg-purple-100 text-purple-800' },
   ];
 
@@ -29,7 +32,7 @@ export const ChannelSelector = ({ selectedChannel, onChannelChange }: ChannelSel
       <DropdownMenuTrigger asChild>
         <Button variant="outline" className="flex items-center space-x-2">
           <CurrentIcon className="h-4 w-4" />
-          <span>{currentChannel?.name}</span>
+          <span className="hidden sm:inline">{currentChannel?.name}</span>
           <ChevronDown className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
