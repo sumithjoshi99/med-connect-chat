@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -25,6 +24,8 @@ interface Patient {
   phone: string | null;
   email: string | null;
   preferred_channel: string;
+  status: string;
+  created_at: string;
 }
 
 interface MessageAreaProps {
@@ -116,16 +117,31 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
       throw new Error('Patient phone number is required for SMS');
     }
 
-    const { data, error } = await supabase.functions.invoke('send-sms', {
-      body: {
-        to: patient.phone,
-        message: content,
-        patientId: patient.id
-      }
-    });
+    console.log('Attempting to send SMS via edge function...');
+    console.log('Patient phone:', patient.phone);
+    console.log('Message content:', content);
 
-    if (error) throw error;
-    return data;
+    try {
+      const { data, error } = await supabase.functions.invoke('send-sms', {
+        body: {
+          to: patient.phone,
+          message: content,
+          patientId: patient.id
+        }
+      });
+
+      console.log('Edge function response:', { data, error });
+
+      if (error) {
+        console.error('Edge function error details:', error);
+        throw new Error(`SMS service error: ${error.message}`);
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Failed to invoke SMS function:', error);
+      throw error;
+    }
   };
 
   const handleSendMessage = async () => {
@@ -147,13 +163,27 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
           status: 'sending'
         });
 
-      if (dbError) throw dbError;
+      if (dbError) {
+        console.error('Database error:', dbError);
+        throw new Error(`Database error: ${dbError.message}`);
+      }
 
       // If it's an SMS, actually send it via Twilio
       if (channel === 'sms') {
         try {
           await sendSMS(newMessage);
           console.log('SMS sent successfully via Twilio');
+          
+          // Update message status to sent
+          await supabase
+            .from('messages')
+            .update({ status: 'sent' })
+            .eq('patient_id', patient.id)
+            .eq('content', newMessage)
+            .eq('direction', 'outbound')
+            .order('created_at', { ascending: false })
+            .limit(1);
+            
         } catch (smsError) {
           console.error('Failed to send SMS:', smsError);
           // Update message status to failed
@@ -166,8 +196,20 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
             .order('created_at', { ascending: false })
             .limit(1);
           
-          throw new Error('Failed to send SMS');
+          // Provide more specific error message
+          const errorMessage = smsError instanceof Error ? smsError.message : 'Unknown SMS error';
+          throw new Error(`Failed to send SMS: ${errorMessage}`);
         }
+      } else {
+        // For non-SMS channels, just mark as sent (simulation)
+        await supabase
+          .from('messages')
+          .update({ status: 'sent' })
+          .eq('patient_id', patient.id)
+          .eq('content', newMessage)
+          .eq('direction', 'outbound')
+          .order('created_at', { ascending: false })
+          .limit(1);
       }
 
       setNewMessage("");
@@ -179,9 +221,10 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
       
     } catch (error) {
       console.error('Error sending message:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to send message",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
