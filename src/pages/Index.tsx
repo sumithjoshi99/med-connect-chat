@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +17,7 @@ interface Patient {
   email: string | null;
   preferred_channel: string;
   status: string;
+  created_at: string;
 }
 
 const Index = () => {

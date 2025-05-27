@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -65,7 +64,14 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
         .order('created_at', { ascending: true });
 
       if (error) throw error;
-      setMessages(data || []);
+      
+      // Type cast the direction field to ensure it matches our interface
+      const typedMessages: Message[] = (data || []).map(msg => ({
+        ...msg,
+        direction: msg.direction as 'inbound' | 'outbound'
+      }));
+      
+      setMessages(typedMessages);
     } catch (error) {
       console.error('Error fetching messages:', error);
       toast({
@@ -90,7 +96,11 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
           filter: `patient_id=eq.${patient.id}`
         },
         (payload) => {
-          setMessages(prev => [...prev, payload.new as Message]);
+          const newMessage = {
+            ...payload.new,
+            direction: payload.new.direction as 'inbound' | 'outbound'
+          } as Message;
+          setMessages(prev => [...prev, newMessage]);
         }
       )
       .subscribe();
