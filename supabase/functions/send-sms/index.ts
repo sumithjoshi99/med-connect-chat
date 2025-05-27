@@ -7,19 +7,42 @@ const corsHeaders = {
 }
 
 serve(async (req) => {
+  console.log('SMS function called with method:', req.method)
+  
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    const { to, message, patientId } = await req.json()
+    const requestBody = await req.json()
+    console.log('Request body received:', requestBody)
+    
+    const { to, message, patientId } = requestBody
+    
+    if (!to || !message) {
+      console.error('Missing required fields:', { to: !!to, message: !!message })
+      return new Response(
+        JSON.stringify({ error: 'Missing required fields: to and message' }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      )
+    }
     
     // Get Twilio credentials from secrets
     const twilioAccountSid = Deno.env.get('TWILIO_ACCOUNT_SID')
     const twilioAuthToken = Deno.env.get('TWILIO_AUTH_TOKEN')
     const twilioPhoneNumber = Deno.env.get('TWILIO_PHONE_NUMBER')
     
+    console.log('Twilio credentials check:', {
+      accountSid: !!twilioAccountSid,
+      authToken: !!twilioAuthToken,
+      phoneNumber: !!twilioPhoneNumber
+    })
+    
     if (!twilioAccountSid || !twilioAuthToken || !twilioPhoneNumber) {
+      console.error('Missing Twilio credentials')
       return new Response(
         JSON.stringify({ error: 'Twilio credentials not configured' }),
         {
@@ -28,6 +51,15 @@ serve(async (req) => {
         }
       )
     }
+
+    // Prepare the request body for Twilio
+    const twilioBody = new URLSearchParams({
+      To: to,
+      From: twilioPhoneNumber,
+      Body: message,
+    })
+
+    console.log('Sending SMS to Twilio:', { to, from: twilioPhoneNumber, bodyLength: message.length })
 
     // Send SMS via Twilio
     const response = await fetch(
@@ -38,19 +70,30 @@ serve(async (req) => {
           'Authorization': `Basic ${btoa(`${twilioAccountSid}:${twilioAuthToken}`)}`,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: new URLSearchParams({
-          To: to,
-          From: twilioPhoneNumber,
-          Body: message,
-        }),
+        body: twilioBody,
       }
     )
 
+    console.log('Twilio response status:', response.status)
+    
     const twilioResponse = await response.json()
+    console.log('Twilio response:', twilioResponse)
     
     if (!response.ok) {
-      throw new Error(twilioResponse.message || 'Failed to send SMS')
+      console.error('Twilio API error:', twilioResponse)
+      return new Response(
+        JSON.stringify({ 
+          error: twilioResponse.message || 'Failed to send SMS',
+          details: twilioResponse 
+        }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      )
     }
+
+    console.log('SMS sent successfully, SID:', twilioResponse.sid)
 
     return new Response(
       JSON.stringify({ 
@@ -63,8 +106,12 @@ serve(async (req) => {
       }
     )
   } catch (error) {
+    console.error('Edge function error:', error)
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ 
+        error: error.message || 'Internal server error',
+        stack: error.stack 
+      }),
       {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
