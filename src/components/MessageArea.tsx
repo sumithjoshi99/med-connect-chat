@@ -1,3 +1,4 @@
+
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -110,6 +111,23 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
     };
   };
 
+  const sendSMS = async (content: string) => {
+    if (!patient.phone) {
+      throw new Error('Patient phone number is required for SMS');
+    }
+
+    const { data, error } = await supabase.functions.invoke('send-sms', {
+      body: {
+        to: patient.phone,
+        message: content,
+        patientId: patient.id
+      }
+    });
+
+    if (error) throw error;
+    return data;
+  };
+
   const handleSendMessage = async () => {
     if (!newMessage.trim()) return;
 
@@ -117,7 +135,8 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
     console.log(`Sending ${channel} message to ${patient.name}: ${newMessage}`);
 
     try {
-      const { error } = await supabase
+      // First, store the message in the database
+      const { error: dbError } = await supabase
         .from('messages')
         .insert({
           patient_id: patient.id,
@@ -125,10 +144,31 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
           direction: 'outbound',
           content: newMessage,
           sender_name: 'PharmaCare',
-          status: 'sent'
+          status: 'sending'
         });
 
-      if (error) throw error;
+      if (dbError) throw dbError;
+
+      // If it's an SMS, actually send it via Twilio
+      if (channel === 'sms') {
+        try {
+          await sendSMS(newMessage);
+          console.log('SMS sent successfully via Twilio');
+        } catch (smsError) {
+          console.error('Failed to send SMS:', smsError);
+          // Update message status to failed
+          await supabase
+            .from('messages')
+            .update({ status: 'failed' })
+            .eq('patient_id', patient.id)
+            .eq('content', newMessage)
+            .eq('direction', 'outbound')
+            .order('created_at', { ascending: false })
+            .limit(1);
+          
+          throw new Error('Failed to send SMS');
+        }
+      }
 
       setNewMessage("");
       
@@ -136,15 +176,12 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
         title: "Message sent",
         description: `${channel.toUpperCase()} message sent to ${patient.name}`,
       });
-
-      // Here you would integrate with actual messaging services
-      // sendViaExternalService(channel, patient, newMessage);
       
     } catch (error) {
       console.error('Error sending message:', error);
       toast({
         title: "Error",
-        description: "Failed to send message",
+        description: error instanceof Error ? error.message : "Failed to send message",
         variant: "destructive",
       });
     } finally {
