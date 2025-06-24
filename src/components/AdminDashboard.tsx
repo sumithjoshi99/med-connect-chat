@@ -695,6 +695,23 @@ export const AdminDashboard = () => {
 
           <TabsContent value="staff" className="flex-1 overflow-hidden mt-4">
             <div className="p-6 space-y-6">
+              {/* Debug Banner */}
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div className="flex items-center">
+                  <div className="flex-shrink-0">
+                    🧪
+                  </div>
+                  <div className="ml-3">
+                    <h3 className="text-sm font-medium text-yellow-800">
+                      Debug Mode: Staff Authentication Testing
+                    </h3>
+                    <div className="mt-2 text-sm text-yellow-700">
+                      <p>The orange "🧪 Create Test Account" button is in the top-right area below. Click it to create a test staff account instantly.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* Search and Filter */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
@@ -722,18 +739,22 @@ export const AdminDashboard = () => {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="flex space-x-2">
-                  <Button onClick={() => setShowAddStaffDialog(true)}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Add Staff Member
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    onClick={createTestStaffAccount}
-                    disabled={loading}
-                  >
-                    🧪 Create Test Account
-                  </Button>
+                <div className="flex flex-col items-end space-y-2">
+                  <div className="text-xs text-gray-500">👀 Look for the orange button below:</div>
+                  <div className="flex space-x-2">
+                    <Button onClick={() => setShowAddStaffDialog(true)}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add Staff Member
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      onClick={createTestStaffAccount}
+                      disabled={loading}
+                      className="bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100"
+                    >
+                      🧪 Create Test Account
+                    </Button>
+                  </div>
                 </div>
               </div>
 
