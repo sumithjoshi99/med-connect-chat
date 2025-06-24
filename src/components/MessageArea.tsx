@@ -1,11 +1,33 @@
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { Database } from "@/integrations/supabase/types";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
-import { Send, Paperclip, Smile, Phone, Video } from "lucide-react";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Card, CardContent } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
+import { 
+  Send, 
+  Phone, 
+  Video, 
+  MoreVertical, 
+  Trash2, 
+  Copy,
+  Check,
+  Clock,
+  AlertCircle,
+  Loader2
+} from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { ChannelSelector } from "./ChannelSelector";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 
 interface Message {
   id: string;
@@ -18,15 +40,7 @@ interface Message {
   created_at: string;
 }
 
-interface Patient {
-  id: string;
-  name: string;
-  phone: string | null;
-  email: string | null;
-  preferred_channel: string;
-  status: string;
-  created_at: string;
-}
+type Patient = Database['public']['Tables']['patients']['Row'];
 
 interface MessageAreaProps {
   patient: Patient;
@@ -38,6 +52,7 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
   const [newMessage, setNewMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(true);
+  const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -46,19 +61,41 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
   };
 
   useEffect(() => {
-    if (patient?.id) {
-      fetchMessages();
-      subscribeToMessages();
-    }
-  }, [patient?.id]);
-
-  useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
+  useEffect(() => {
+    if (patient?.id) {
+      fetchMessages();
+      
+      // Set up real-time subscription
+      const subscription = supabase
+        .channel(`messages_${patient.id}`)
+        .on('postgres_changes', 
+          { 
+            event: '*', 
+            schema: 'public', 
+            table: 'messages',
+            filter: `patient_id=eq.${patient.id}`
+          }, 
+          () => {
+            console.log('Message changed, refreshing...');
+            fetchMessages();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        subscription.unsubscribe();
+      };
+    }
+  }, [patient?.id]);
+
   const fetchMessages = async () => {
+    if (!patient?.id) return;
+    
+    setLoadingMessages(true);
     try {
-      setLoadingMessages(true);
       const { data, error } = await supabase
         .from('messages')
         .select('*')
@@ -66,14 +103,7 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
         .order('created_at', { ascending: true });
 
       if (error) throw error;
-      
-      // Type cast the direction field to ensure it matches our interface
-      const typedMessages: Message[] = (data || []).map(msg => ({
-        ...msg,
-        direction: msg.direction as 'inbound' | 'outbound'
-      }));
-      
-      setMessages(typedMessages);
+      setMessages(data || []);
     } catch (error) {
       console.error('Error fetching messages:', error);
       toast({
@@ -86,30 +116,27 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
     }
   };
 
-  const subscribeToMessages = () => {
-    const channel_subscription = supabase
-      .channel('messages-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `patient_id=eq.${patient.id}`
-        },
-        (payload) => {
-          const newMessage = {
-            ...payload.new,
-            direction: payload.new.direction as 'inbound' | 'outbound'
-          } as Message;
-          setMessages(prev => [...prev, newMessage]);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel_subscription);
-    };
+  const formatPhoneNumber = (phone: string) => {
+    // Remove all non-digit characters
+    const digits = phone.replace(/\D/g, '');
+    
+    // If it's a 10-digit US number, add +1
+    if (digits.length === 10) {
+      return `+1${digits}`;
+    }
+    
+    // If it's an 11-digit number starting with 1, add +
+    if (digits.length === 11 && digits.startsWith('1')) {
+      return `+${digits}`;
+    }
+    
+    // If it already has a country code, return as is (but ensure + prefix)
+    if (digits.length > 11) {
+      return phone.startsWith('+') ? phone : `+${digits}`;
+    }
+    
+    // Default: return with + if not present
+    return phone.startsWith('+') ? phone : `+${phone}`;
   };
 
   const sendSMS = async (content: string) => {
@@ -117,14 +144,16 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
       throw new Error('Patient phone number is required for SMS');
     }
 
+    const formattedPhone = formatPhoneNumber(patient.phone);
     console.log('Attempting to send SMS via edge function...');
-    console.log('Patient phone:', patient.phone);
+    console.log('Original phone:', patient.phone);
+    console.log('Formatted phone:', formattedPhone);
     console.log('Message content:', content);
 
     try {
       const { data, error } = await supabase.functions.invoke('send-sms', {
         body: {
-          to: patient.phone,
+          to: formattedPhone,
           message: content,
           patientId: patient.id
         }
@@ -148,10 +177,11 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
     if (!newMessage.trim()) return;
 
     setIsLoading(true);
+    setIsTyping(true);
     console.log(`Sending ${channel} message to ${patient.name}: ${newMessage}`);
 
     try {
-      // First, store the message in the database
+      // Store the message in the database first
       const { error: dbError } = await supabase
         .from('messages')
         .insert({
@@ -159,7 +189,7 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
           channel: channel,
           direction: 'outbound',
           content: newMessage,
-          sender_name: 'PharmaCare',
+          sender_name: 'MedConnect',
           status: 'sending'
         });
 
@@ -168,9 +198,12 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
         throw new Error(`Database error: ${dbError.message}`);
       }
 
+      console.log('Message saved to database successfully');
+
       // If it's an SMS, actually send it via Twilio
-      if (channel === 'sms') {
+      if (channel === 'sms' && patient.phone) {
         try {
+          console.log('Attempting to send SMS via Twilio...');
           await sendSMS(newMessage);
           console.log('SMS sent successfully via Twilio');
           
@@ -196,9 +229,7 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
             .order('created_at', { ascending: false })
             .limit(1);
           
-          // Provide more specific error message
-          const errorMessage = smsError instanceof Error ? smsError.message : 'Unknown SMS error';
-          throw new Error(`Failed to send SMS: ${errorMessage}`);
+          throw new Error(`SMS failed: ${smsError instanceof Error ? smsError.message : 'Unknown error'}`);
         }
       } else {
         // For non-SMS channels, just mark as sent (simulation)
@@ -214,9 +245,12 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
 
       setNewMessage("");
       
+      // Refresh messages to show the new one
+      await fetchMessages();
+      
       toast({
         title: "Message sent",
-        description: `${channel.toUpperCase()} message sent to ${patient.name}`,
+        description: channel === 'sms' ? `SMS sent to ${patient.name}` : `${channel.toUpperCase()} message sent to ${patient.name}`,
       });
       
     } catch (error) {
@@ -229,6 +263,7 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
       });
     } finally {
       setIsLoading(false);
+      setIsTyping(false);
     }
   };
 
@@ -239,147 +274,274 @@ export const MessageArea = ({ patient, channel }: MessageAreaProps) => {
     }
   };
 
-  const getChannelBadgeColor = (messageChannel: string) => {
-    switch (messageChannel) {
-      case 'sms':
-        return 'bg-green-100 text-green-800';
-      case 'email':
-        return 'bg-blue-100 text-blue-800';
-      case 'whatsapp':
-        return 'bg-green-100 text-green-800';
-      case 'facebook':
-        return 'bg-blue-100 text-blue-800';
-      case 'instagram':
-        return 'bg-pink-100 text-pink-800';
-      default:
-        return 'bg-gray-100 text-gray-800';
+  const copyMessage = (content: string) => {
+    navigator.clipboard.writeText(content);
+    toast({
+      title: "Copied",
+      description: "Message copied to clipboard",
+    });
+  };
+
+  const deleteMessage = async (messageId: string) => {
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .delete()
+        .eq('id', messageId);
+
+      if (error) throw error;
+
+      setMessages(prev => prev.filter(msg => msg.id !== messageId));
+      toast({
+        title: "Message deleted",
+        description: "Message has been removed",
+      });
+    } catch (error) {
+      console.error('Error deleting message:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete message",
+        variant: "destructive",
+      });
     }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'sending':
+        return <Clock className="w-3 h-3 text-gray-400" />;
+      case 'sent':
+        return <Check className="w-3 h-3 text-blue-500" />;
+      case 'delivered':
+        return <Check className="w-3 h-3 text-green-500" />;
+      case 'failed':
+        return <AlertCircle className="w-3 h-3 text-red-500" />;
+      default:
+        return null;
+    }
+  };
+
+  const formatTime = (timestamp: string) => {
+    return new Date(timestamp).toLocaleTimeString([], { 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+  };
+
+  const MessageBubble = ({ message }: { message: Message }) => {
+    const isOutbound = message.direction === 'outbound';
+    
+    return (
+      <div className={cn(
+        "flex mb-4 group",
+        isOutbound ? "justify-end" : "justify-start"
+      )}>
+        <div className={cn(
+          "flex items-end space-x-2 max-w-[70%]",
+          isOutbound ? "flex-row-reverse space-x-reverse" : "flex-row"
+        )}>
+          {!isOutbound && (
+            <Avatar className="w-8 h-8 mb-1">
+              <AvatarFallback className="bg-blue-100 text-blue-700 text-xs">
+                {patient.name.split(' ').map(n => n[0]).join('')}
+              </AvatarFallback>
+            </Avatar>
+          )}
+          
+          <div className={cn(
+            "relative px-4 py-3 rounded-2xl shadow-sm",
+            isOutbound 
+              ? "bg-blue-500 text-white rounded-br-md" 
+              : "bg-white border border-gray-200 rounded-bl-md"
+          )}>
+            <p className="text-sm leading-relaxed break-words">
+              {message.content}
+            </p>
+            
+            <div className={cn(
+              "flex items-center justify-between mt-2 text-xs gap-2",
+              isOutbound ? "text-blue-100" : "text-gray-500"
+            )}>
+              <span>{formatTime(message.created_at)}</span>
+              {isOutbound && (
+                <div className="flex items-center space-x-1">
+                  {getStatusIcon(message.status)}
+                </div>
+              )}
+            </div>
+            
+            {/* Message actions (visible on hover) */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "absolute -top-2 -right-2 h-6 w-6 p-0 rounded-full opacity-0 group-hover:opacity-100 transition-opacity",
+                    isOutbound ? "bg-white/10 hover:bg-white/20 text-white" : "bg-gray-100 hover:bg-gray-200"
+                  )}
+                >
+                  <MoreVertical className="w-3 h-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => copyMessage(message.content)}>
+                  <Copy className="w-4 h-4 mr-2" />
+                  Copy
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  onClick={() => deleteMessage(message.id)}
+                  className="text-red-600"
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   if (loadingMessages) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-gray-500">Loading messages...</div>
+      <div className="flex-1 flex items-center justify-center">
+        <div className="flex items-center space-x-2 text-gray-500">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span>Loading messages...</span>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Channel Info Header */}
-      <div className="bg-blue-50 border-b border-blue-200 p-4">
+    <div className="flex flex-col h-full bg-gray-50">
+      {/* Enhanced Header */}
+      <div className="bg-white border-b border-gray-200 p-4">
         <div className="flex items-center justify-between">
-          <div>
-            <h4 className="font-medium text-blue-900">
-              Communicating via {channel.toUpperCase()}
-            </h4>
-            <p className="text-sm text-blue-700">
-              {channel === 'sms' && patient.phone && `Phone: ${patient.phone}`}
-              {channel === 'email' && patient.email && `Email: ${patient.email}`}
-              {channel === 'whatsapp' && patient.phone && `WhatsApp: ${patient.phone}`}
-              {channel === 'facebook' && 'Facebook Messenger'}
-              {channel === 'instagram' && 'Instagram Direct'}
-            </p>
-          </div>
-          <div className="flex space-x-2">
-            <Button variant="outline" size="sm">
-              <Phone className="h-4 w-4 mr-2" />
-              Call
-            </Button>
-            <Button variant="outline" size="sm">
-              <Video className="h-4 w-4 mr-2" />
-              Video
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`flex ${message.direction === 'outbound' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div
-              className={`max-w-[70%] ${
-                message.direction === 'outbound'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white border border-gray-200 text-gray-900'
-              } rounded-lg p-3 shadow-sm`}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-medium">
-                  {message.sender_name || (message.direction === 'outbound' ? 'PharmaCare' : patient.name)}
-                </span>
-                <Badge 
-                  className={`text-xs ${getChannelBadgeColor(message.channel)}`}
-                >
-                  {message.channel.toUpperCase()}
-                </Badge>
-              </div>
-              <p className="text-sm mb-2">{message.content}</p>
-              <div className="flex items-center justify-between">
-                <span className={`text-xs ${
-                  message.direction === 'outbound' ? 'text-blue-100' : 'text-gray-500'
-                }`}>
-                  {new Date(message.created_at).toLocaleTimeString([], { 
-                    hour: '2-digit', 
-                    minute: '2-digit' 
-                  })}
-                </span>
-                {message.direction === 'outbound' && (
-                  <span className={`text-xs text-blue-100`}>
-                    {message.status}
-                  </span>
+          <div className="flex items-center space-x-3">
+            <Avatar className="w-10 h-10">
+              <AvatarFallback className="bg-blue-100 text-blue-700">
+                {patient.name.split(' ').map(n => n[0]).join('')}
+              </AvatarFallback>
+            </Avatar>
+            <div>
+              <h3 className="font-semibold text-gray-900">{patient.name}</h3>
+              <div className="flex items-center space-x-2 text-sm text-gray-500">
+                {channel === 'sms' && patient.phone && (
+                  <span>{patient.phone}</span>
                 )}
+                {channel === 'email' && patient.email && (
+                  <span>{patient.email}</span>
+                )}
+                <Badge variant="secondary" className="text-xs">
+                  {channel.toUpperCase()}
+                </Badge>
               </div>
             </div>
           </div>
-        ))}
+          
+          <div className="flex items-center space-x-2">
+            <ChannelSelector 
+              selectedChannel={channel}
+              onChannelChange={() => {}} // Channel changing handled at parent level
+            />
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => {
+                if (patient.phone) {
+                  window.open(`tel:${patient.phone}`, '_self');
+                } else {
+                  toast({
+                    title: "No phone number",
+                    description: "This patient doesn't have a phone number on file",
+                    variant: "destructive",
+                  });
+                }
+              }}
+            >
+              <Phone className="w-4 h-4" />
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => {
+                toast({
+                  title: "Video Call",
+                  description: "Video calling feature coming soon",
+                });
+              }}
+            >
+              <Video className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Messages Area */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {messages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
+              <Send className="w-8 h-8 text-blue-500" />
+            </div>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Start a conversation</h3>
+            <p className="text-gray-500 max-w-sm">
+              Send a message to {patient.name} to begin your conversation.
+            </p>
+          </div>
+        ) : (
+          <>
+            {messages.map((message) => (
+              <MessageBubble key={message.id} message={message} />
+            ))}
+            {isTyping && (
+              <div className="flex justify-start">
+                <div className="bg-white border border-gray-200 rounded-2xl rounded-bl-md px-4 py-3">
+                  <div className="flex space-x-1">
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Message Input */}
-      <div className="border-t border-gray-200 p-4 bg-white">
-        <div className="flex items-end space-x-2">
+      {/* Enhanced Input Area */}
+      <div className="bg-white border-t border-gray-200 p-4">
+        <div className="flex items-end space-x-3">
           <div className="flex-1">
-            <Textarea
-              placeholder={`Type your ${channel} message...`}
+            <Input
               value={newMessage}
               onChange={(e) => setNewMessage(e.target.value)}
               onKeyPress={handleKeyPress}
-              className="min-h-[60px] resize-none"
+              placeholder={`Send a message to ${patient.name}...`}
+              className="resize-none border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl"
               disabled={isLoading}
             />
           </div>
-          <div className="flex flex-col space-y-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="p-2"
-            >
-              <Paperclip className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="p-2"
-            >
-              <Smile className="h-4 w-4" />
-            </Button>
-            <Button
-              onClick={handleSendMessage}
-              disabled={!newMessage.trim() || isLoading}
-              className="p-2"
-            >
-              <Send className="h-4 w-4" />
-            </Button>
-          </div>
+          <Button 
+            onClick={handleSendMessage}
+            disabled={!newMessage.trim() || isLoading}
+            size="sm"
+            className="rounded-xl px-4 py-2 h-auto"
+          >
+            {isLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Send className="w-4 h-4" />
+            )}
+          </Button>
         </div>
-        <div className="mt-2 text-xs text-gray-500">
-          Press Enter to send • Shift+Enter for new line
-        </div>
+        <p className="text-xs text-gray-500 mt-2">
+          Press Enter to send • {channel === 'sms' ? 'SMS' : channel.toUpperCase()} message
+        </p>
       </div>
     </div>
   );

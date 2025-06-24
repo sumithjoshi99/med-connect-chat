@@ -1,32 +1,51 @@
-import { useState, useEffect } from "react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import React, { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
-import { Phone, Mail, MessageSquare } from "lucide-react";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Separator } from "@/components/ui/separator";
+import { useToast } from "@/hooks/use-toast";
+import { 
+  Search, 
+  Plus, 
+  Phone, 
+  Mail, 
+  MessageSquare, 
+  Clock,
+  Users,
+  Filter,
+  MoreVertical,
+  Edit,
+  Trash2
+} from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { AddPatientDialog } from "./AddPatientDialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
+import { Database } from "@/integrations/supabase/types";
 
-interface Patient {
-  id: string;
-  name: string;
-  phone: string | null;
-  email: string | null;
-  preferred_channel: string;
-  status: string;
-  created_at: string;
-  unreadCount?: number;
-  lastMessage?: string;
-  lastMessageTime?: string;
-}
+type Patient = Database['public']['Tables']['patients']['Row'];
 
 interface PatientListProps {
-  searchQuery: string;
   selectedPatient: Patient | null;
-  onSelectPatient: (patient: Patient) => void;
+  onPatientSelect: (patient: Patient) => void;
+  onPatientAdded: () => void;
 }
 
-export const PatientList = ({ searchQuery, selectedPatient, onSelectPatient }: PatientListProps) => {
+export const PatientList = ({ selectedPatient, onPatientSelect, onPatientAdded }: PatientListProps) => {
   const [patients, setPatients] = useState<Patient[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     fetchPatients();
@@ -34,120 +53,322 @@ export const PatientList = ({ searchQuery, selectedPatient, onSelectPatient }: P
 
   const fetchPatients = async () => {
     try {
+      setLoading(true);
       const { data, error } = await supabase
         .from('patients')
         .select('*')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-
-      // Get message counts and last messages for each patient
-      const patientsWithMessages = await Promise.all(
-        (data || []).map(async (patient) => {
-          const { data: messages } = await supabase
-            .from('messages')
-            .select('*')
-            .eq('patient_id', patient.id)
-            .order('created_at', { ascending: false })
-            .limit(1);
-
-          const lastMessage = messages?.[0];
-          
-          return {
-            ...patient,
-            lastMessage: lastMessage?.content || "No messages yet",
-            lastMessageTime: lastMessage ? new Date(lastMessage.created_at).toLocaleString() : "",
-            unreadCount: 0 // This would need more complex logic based on read status
-          };
-        })
-      );
-
-      setPatients(patientsWithMessages);
+      setPatients(data || []);
     } catch (error) {
       console.error('Error fetching patients:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load patients",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const filteredPatients = patients.filter(patient =>
-    patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    patient.id.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const handlePatientAdded = () => {
+    fetchPatients();
+    onPatientAdded();
+    setShowAddDialog(false);
+  };
+
+  const deletePatient = async (patientId: string) => {
+    try {
+      // First delete all messages for this patient
+      await supabase
+        .from('messages')
+        .delete()
+        .eq('patient_id', patientId);
+
+      // Then delete the patient
+      const { error } = await supabase
+        .from('patients')
+        .delete()
+        .eq('id', patientId);
+
+      if (error) throw error;
+
+      setPatients(prev => prev.filter(p => p.id !== patientId));
+      
+      // If the deleted patient was selected, clear selection
+      if (selectedPatient?.id === patientId) {
+        onPatientSelect(null as any);
+      }
+
+      toast({
+        title: "Patient deleted",
+        description: "Patient and all messages have been removed",
+      });
+    } catch (error) {
+      console.error('Error deleting patient:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete patient",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const filteredPatients = patients.filter(patient => {
+    const matchesSearch = patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         (patient.phone && patient.phone.includes(searchTerm)) ||
+                         (patient.email && patient.email.toLowerCase().includes(searchTerm.toLowerCase()));
+    
+    const matchesStatus = statusFilter === "all" || patient.status === statusFilter;
+    
+    return matchesSearch && matchesStatus;
+  });
 
   const getChannelIcon = (channel: string) => {
     switch (channel) {
       case 'sms':
-        return <MessageSquare className="h-3 w-3" />;
+        return <Phone className="w-4 h-4" />;
       case 'email':
-        return <Mail className="h-3 w-3" />;
-      case 'phone':
-        return <Phone className="h-3 w-3" />;
+        return <Mail className="w-4 h-4" />;
+      case 'whatsapp':
+        return <MessageSquare className="w-4 h-4" />;
       default:
-        return <MessageSquare className="h-3 w-3" />;
+        return <MessageSquare className="w-4 h-4" />;
     }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'active':
+        return 'bg-green-100 text-green-800 border-green-200';
+      case 'inactive':
+        return 'bg-gray-100 text-gray-800 border-gray-200';
+      case 'pending':
+        return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+      default:
+        return 'bg-gray-100 text-gray-800 border-gray-200';
+    }
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - date.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 1) return 'Today';
+    if (diffDays === 2) return 'Yesterday';
+    if (diffDays <= 7) return `${diffDays - 1} days ago`;
+    return date.toLocaleDateString();
+  };
+
+  const PatientCard = ({ patient }: { patient: Patient }) => {
+    const isSelected = selectedPatient?.id === patient.id;
+    
+    return (
+      <Card 
+        className={cn(
+          "cursor-pointer transition-all duration-200 hover:shadow-md border-2",
+          isSelected 
+            ? "border-blue-500 bg-blue-50 shadow-md" 
+            : "border-gray-200 hover:border-gray-300"
+        )}
+        onClick={() => onPatientSelect(patient)}
+      >
+        <CardContent className="p-4">
+          <div className="flex items-start justify-between">
+            <div className="flex items-start space-x-3 flex-1">
+              <Avatar className="w-12 h-12 ring-2 ring-white shadow-sm">
+                <AvatarFallback className="bg-gradient-to-br from-blue-500 to-purple-600 text-white font-semibold">
+                  {patient.name.split(' ').map(n => n[0]).join('')}
+                </AvatarFallback>
+              </Avatar>
+              
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center space-x-2 mb-1">
+                  <h3 className="font-semibold text-gray-900 truncate">
+                    {patient.name}
+                  </h3>
+                  <Badge 
+                    variant="outline" 
+                    className={cn("text-xs", getStatusColor(patient.status))}
+                  >
+                    {patient.status}
+                  </Badge>
+                </div>
+                
+                <div className="space-y-1">
+                  {patient.phone && (
+                    <div className="flex items-center space-x-2 text-sm text-gray-600">
+                      <Phone className="w-3 h-3" />
+                      <span className="truncate">{patient.phone}</span>
+                    </div>
+                  )}
+                  {patient.email && (
+                    <div className="flex items-center space-x-2 text-sm text-gray-600">
+                      <Mail className="w-3 h-3" />
+                      <span className="truncate">{patient.email}</span>
+                    </div>
+                  )}
+                </div>
+                
+                <div className="flex items-center justify-between mt-3">
+                  <div className="flex items-center space-x-2 text-xs text-gray-500">
+                    {getChannelIcon(patient.preferred_channel)}
+                    <span>Preferred: {patient.preferred_channel.toUpperCase()}</span>
+                  </div>
+                  <div className="flex items-center space-x-1 text-xs text-gray-500">
+                    <Clock className="w-3 h-3" />
+                    <span>{formatDate(patient.created_at)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <MoreVertical className="w-4 h-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem>
+                  <Edit className="w-4 h-4 mr-2" />
+                  Edit Patient
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  onClick={() => deletePatient(patient.id)}
+                  className="text-red-600"
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete Patient
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </CardContent>
+      </Card>
+    );
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center p-8">
-        <div className="text-sm text-gray-500">Loading patients...</div>
+      <div className="h-full flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-500">Loading patients...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-1 p-2">
-      {filteredPatients.map((patient) => (
-        <Card
-          key={patient.id}
-          className={`p-3 cursor-pointer transition-colors hover:bg-gray-50 ${
-            selectedPatient?.id === patient.id ? 'bg-blue-50 border-blue-200' : ''
-          }`}
-          onClick={() => onSelectPatient(patient)}
-        >
-          <div className="flex items-start space-x-3">
-            <Avatar className="h-10 w-10">
-              <AvatarFallback>
-                {patient.name.split(' ').map(n => n[0]).join('')}
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between">
-                <h4 className="text-sm font-medium text-gray-900 truncate">
-                  {patient.name}
-                </h4>
-                {patient.unreadCount && patient.unreadCount > 0 && (
-                  <Badge variant="destructive" className="ml-2 h-5 min-w-[20px] text-xs">
-                    {patient.unreadCount}
-                  </Badge>
-                )}
-              </div>
-              <p className="text-xs text-gray-500 mb-1">{patient.id.slice(0, 8)}</p>
-              <p className="text-sm text-gray-600 truncate mb-2">
-                {patient.lastMessage}
-              </p>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-400">{patient.lastMessageTime}</span>
-                <div className="flex items-center space-x-1">
-                  {getChannelIcon(patient.preferred_channel)}
-                  <Badge 
-                    variant={patient.status === 'active' ? 'default' : 'secondary'}
-                    className="text-xs"
-                  >
-                    {patient.status}
-                  </Badge>
-                </div>
-              </div>
-            </div>
+    <div className="h-full flex flex-col bg-gray-50">
+      {/* Enhanced Header */}
+      <div className="bg-white border-b border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center space-x-2">
+            <Users className="w-6 h-6 text-blue-600" />
+            <h2 className="text-xl font-semibold text-gray-900">Patients</h2>
+            <Badge variant="secondary" className="ml-2">
+              {filteredPatients.length}
+            </Badge>
           </div>
-        </Card>
-      ))}
-      {filteredPatients.length === 0 && (
-        <div className="text-center p-8 text-gray-500">
-          <p>No patients found.</p>
+          <Button 
+            onClick={() => setShowAddDialog(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Add Patient
+          </Button>
         </div>
-      )}
+        
+        {/* Search and Filter */}
+        <div className="flex space-x-3">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <Input
+              placeholder="Search patients..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+          
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="min-w-fit">
+                <Filter className="w-4 h-4 mr-2" />
+                {statusFilter === "all" ? "All Status" : statusFilter}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setStatusFilter("all")}>
+                All Status
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setStatusFilter("active")}>
+                Active
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setStatusFilter("inactive")}>
+                Inactive
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setStatusFilter("pending")}>
+                Pending
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+
+      {/* Patient List */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {filteredPatients.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
+              <Users className="w-8 h-8 text-blue-500" />
+            </div>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">
+              {searchTerm ? 'No patients found' : 'No patients yet'}
+            </h3>
+            <p className="text-gray-500 max-w-sm mb-6">
+              {searchTerm 
+                ? 'Try adjusting your search terms or filters'
+                : 'Add your first patient to start managing conversations'
+              }
+            </p>
+            {!searchTerm && (
+              <Button 
+                onClick={() => setShowAddDialog(true)}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add Your First Patient
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3 group">
+            {filteredPatients.map((patient) => (
+              <PatientCard key={patient.id} patient={patient} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Add Patient Dialog */}
+      <AddPatientDialog
+        open={showAddDialog}
+        onOpenChange={setShowAddDialog}
+        onPatientAdded={handlePatientAdded}
+      />
     </div>
   );
 };
