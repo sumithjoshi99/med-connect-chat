@@ -1,0 +1,22 @@
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="32" height="32" fill="#DC2626" rx="4"/>
+  
+  <!-- Simplified "N" design -->
+  <g fill="#000000">
+    <!-- Left vertical bar -->
+    <rect x="5" y="6" width="4" height="20" rx="1"/>
+    
+    <!-- Right vertical bar -->
+    <rect x="23" y="6" width="4" height="20" rx="1"/>
+    
+    <!-- Diagonal connector -->
+    <path d="M9 6 L23 26 L27 24 L13 4 Z" />
+  </g>
+  
+  <!-- White accent -->
+  <g fill="#FFFFFF" opacity="0.8">
+    <rect x="10" y="8" width="1" height="16" rx="0.5"/>
+    <rect x="21" y="8" width="1" height="16" rx="0.5"/>
+  </g>
+</svg> 

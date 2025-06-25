@@ -390,12 +390,21 @@ export default function Index() {
         {/* Logo */}
         <div className="p-6 border-b border-gray-200">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-              <Heart className="w-6 h-6 text-white" />
+            <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm p-1">
+              <img 
+                src="/narayan-logo.svg" 
+                alt="Narayan Pharmacy Logo" 
+                className="w-full h-full object-contain"
+                onError={(e) => {
+                  // Fallback to background with initials if image fails to load
+                  e.currentTarget.style.display = 'none';
+                  e.currentTarget.parentElement!.innerHTML = '<div class="w-full h-full bg-gradient-to-br from-red-500 to-red-700 rounded-lg flex items-center justify-center text-white font-bold text-sm">N</div>';
+                }}
+              />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-gray-900">MedConnect</h2>
-              <p className="text-xs text-gray-500">Healthcare Communications</p>
+              <h2 className="text-lg font-bold text-gray-900">Narayan Pharmacy</h2>
+              <p className="text-xs text-gray-500">MedConnect Platform</p>
             </div>
           </div>
         </div>

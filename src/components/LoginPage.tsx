@@ -196,8 +196,17 @@ export const LoginPage = ({ onLoginSuccess }: LoginPageProps) => {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
         <div className="text-center">
-          <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg">
-            <Building className="w-10 h-10 text-white" />
+          <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg p-2">
+            <img 
+              src="/narayan-logo.svg" 
+              alt="Narayan Pharmacy Logo" 
+              className="w-full h-full object-contain"
+              onError={(e) => {
+                // Fallback to background with initials if image fails to load
+                e.currentTarget.style.display = 'none';
+                e.currentTarget.parentElement!.innerHTML = '<div class="w-full h-full bg-gradient-to-br from-red-500 to-red-700 rounded-xl flex items-center justify-center text-white font-bold text-2xl">N</div>';
+              }}
+            />
           </div>
           <h2 className="text-4xl font-bold text-gray-900 mb-2">
             Narayan Pharmacy

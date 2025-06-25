@@ -88,16 +88,27 @@ export const AuthWrapper = ({ children }: AuthWrapperProps) => {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
-        <div className="text-center">
-          <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center mx-auto mb-4">
-            <Building className="w-8 h-8 text-white" />
+        <div className="p-6 border-b border-gray-200 flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm p-1">
+                <img 
+                  src="/narayan-logo.svg" 
+                  alt="Narayan Pharmacy Logo" 
+                  className="w-full h-full object-contain"
+                  onError={(e) => {
+                    // Fallback to background with initials if image fails to load
+                    e.currentTarget.style.display = 'none';
+                    e.currentTarget.parentElement!.innerHTML = '<div class="w-full h-full bg-gradient-to-br from-red-500 to-red-700 rounded-lg flex items-center justify-center text-white font-bold text-sm">N</div>';
+                  }}
+                />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-gray-900">Narayan Pharmacy</h1>
+                <p className="text-sm text-gray-600">MedConnect Platform</p>
+              </div>
+            </div>
           </div>
-          <h2 className="mt-6 text-3xl font-extrabold text-gray-900">
-            MedConnect
-          </h2>
-          <p className="mt-2 text-sm text-gray-600">
-            Healthcare Communication Platform
-          </p>
         </div>
 
         <Card>
