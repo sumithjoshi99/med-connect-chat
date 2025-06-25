@@ -198,7 +198,7 @@ export const LoginPage = ({ onLoginSuccess }: LoginPageProps) => {
         <div className="text-center">
           <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg p-2">
             <img 
-              src="/narayan-logo.svg" 
+              src="/narayan-logo.png" 
               alt="Narayan Pharmacy Logo" 
               className="w-full h-full object-contain"
               onError={(e) => {

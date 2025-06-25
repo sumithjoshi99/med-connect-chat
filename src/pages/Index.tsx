@@ -392,7 +392,7 @@ export default function Index() {
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm p-1">
               <img 
-                src="/narayan-logo.svg" 
+                src="/narayan-logo.png" 
                 alt="Narayan Pharmacy Logo" 
                 className="w-full h-full object-contain"
                 onError={(e) => {
