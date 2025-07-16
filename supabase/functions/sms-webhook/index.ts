@@ -23,13 +23,14 @@ serve(async (req) => {
   try {
     const formData = await req.formData()
     const from = formData.get('From')?.toString()
+    const to = formData.get('To')?.toString() // This is our Twilio number that received the message
     const body = formData.get('Body')?.toString()
     const messageId = formData.get('MessageSid')?.toString()
 
-    console.log('Received SMS from:', from, 'Body:', body, 'MessageSid:', messageId)
+    console.log('Received SMS:', { from, to, body, messageId })
 
-    if (!from || !body) {
-      console.error('Missing required fields:', { from: !!from, body: !!body })
+    if (!from || !body || !to) {
+      console.error('Missing required fields:', { from: !!from, body: !!body, to: !!to })
       return new Response('Missing required fields', { 
         status: 400,
         headers: corsHeaders 
@@ -55,19 +56,41 @@ serve(async (req) => {
       }
     })
 
+    // Find the phone number configuration for the receiving number
+    const { data: phoneNumberConfig, error: phoneError } = await supabase
+      .from('twilio_phone_numbers')
+      .select('*')
+      .eq('phone_number', to)
+      .eq('is_active', true)
+      .single()
+
+    if (phoneError || !phoneNumberConfig) {
+      console.error('Phone number configuration not found for:', to, phoneError)
+      // Still process the message but without phone number config
+      console.log('Processing message without phone number config')
+    } else {
+      console.log('Found phone number config:', phoneNumberConfig.display_name)
+    }
+
+    // Check for auto-response
+    if (phoneNumberConfig?.auto_response_enabled && phoneNumberConfig.auto_response_message) {
+      console.log('Auto-response enabled for:', phoneNumberConfig.display_name)
+      // Note: Auto-response logic would go here if needed
+    }
+
     // Normalize phone number for matching (remove +1, dashes, spaces, parentheses)
     const normalizePhone = (phone: string) => {
       return phone.replace(/[\+\-\s\(\)]/g, '').replace(/^1/, '')
     }
 
-    const normalizedFrom = normalizePhone(from || '')
-    console.log('Normalized phone number:', normalizedFrom)
-
-    // Find patient by phone number
+    // Look for existing patient by phone number
+    console.log('Looking for patient with phone:', from)
+    const normalizedFrom = normalizePhone(from)
+    
     const { data: patients, error: patientError } = await supabase
       .from('patients')
-      .select('id, phone, name')
-      .order('created_at', { ascending: false })
+      .select('id, name, phone')
+      .not('phone', 'is', null)
 
     if (patientError) {
       console.error('Error fetching patients:', patientError)
@@ -77,22 +100,16 @@ serve(async (req) => {
       })
     }
 
-    console.log('Found patients:', patients?.length || 0)
-
-    // Find matching patient by normalized phone numbers
+    // Find matching patient by normalized phone number
     let patientId: string | null = null
-    let patientName = 'Unknown Patient'
-    
+    let patientName: string | null = null
+
     for (const patient of patients || []) {
-      if (patient.phone) {
-        const normalizedPatientPhone = normalizePhone(patient.phone)
-        console.log('Comparing:', normalizedFrom, 'with', normalizedPatientPhone, 'for patient:', patient.name)
-        if (normalizedFrom === normalizedPatientPhone) {
-          patientId = patient.id
-          patientName = patient.name
-          console.log('Found matching patient:', patient.id, patient.name)
-          break
-        }
+      if (patient.phone && normalizePhone(patient.phone) === normalizedFrom) {
+        patientId = patient.id
+        patientName = patient.name
+        console.log('Found matching patient:', patientName, 'ID:', patientId)
+        break
       }
     }
 
@@ -106,7 +123,8 @@ serve(async (req) => {
           name: `SMS Contact ${from}`,
           phone: from,
           preferred_channel: 'sms',
-          status: 'active'
+          status: 'active',
+          assigned_phone_number_id: phoneNumberConfig?.id || null
         })
         .select('id, name')
         .single()
@@ -133,7 +151,10 @@ serve(async (req) => {
         content: body,
         sender_name: from,
         external_id: messageId,
-        status: 'received'
+        status: 'received',
+        phone_number_id: phoneNumberConfig?.id || null,
+        twilio_number_from: from,
+        twilio_number_to: to
       })
 
     if (insertError) {
@@ -144,7 +165,11 @@ serve(async (req) => {
       })
     }
 
-    console.log('Successfully processed SMS message for patient:', patientName)
+    console.log('Successfully processed SMS message:', {
+      patient: patientName,
+      phoneNumberUsed: phoneNumberConfig?.display_name || 'Unknown',
+      messageId: messageId
+    })
 
     // Return TwiML response for Twilio (optional)
     return new Response('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', { 

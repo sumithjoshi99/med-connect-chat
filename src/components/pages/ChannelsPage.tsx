@@ -60,9 +60,9 @@ export const ChannelsPage = () => {
       setupRequired: false,
       config: {
         phoneNumber: '+1 (914) 222-1900',
-        accountSid: 'AC••••••••••••••••••••••••••••••',
+        accountSid: 'AC956237533bdb4805ba26c3191c••••••••',
         authToken: '••••••••••••••••••••••••••••••••',
-        webhookUrl: 'https://your-domain.supabase.co/functions/v1/sms-webhook'
+        webhookUrl: 'https://wfhslrzkjgyrxwxlyjyx.supabase.co/functions/v1/sms-webhook'
       },
       lastUsed: '2 minutes ago'
     },

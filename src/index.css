@@ -99,3 +99,33 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Mobile-specific optimizations */
+@media (max-width: 768px) {
+  /* Touch-friendly button sizing */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Better text input on mobile */
+  input[type="text"], input[type="email"], input[type="tel"], textarea {
+    font-size: 16px; /* Prevents zoom on iOS */
+  }
+  
+  /* Improved spacing for mobile */
+  .mobile-padding {
+    padding: 1rem;
+  }
+  
+  /* Mobile-friendly card spacing */
+  .mobile-card-spacing {
+    margin: 0.5rem;
+  }
+  
+  /* Ensure proper viewport handling */
+  .h-screen {
+    height: 100vh;
+    height: -webkit-fill-available;
+  }
+}

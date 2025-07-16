@@ -814,39 +814,41 @@ export const MessageArea = ({ patient, channel, onMessageSent }: MessageAreaProp
   return (
     <div className="flex flex-col h-full bg-gray-50">
       {/* Enhanced Header */}
-      <div className="bg-white border-b border-gray-200 p-4">
+      <div className="bg-white border-b border-gray-200 p-3 md:p-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <Avatar className="w-10 h-10">
+          <div className="flex items-center space-x-3 flex-1 min-w-0">
+            <Avatar className="w-10 h-10 flex-shrink-0">
               <AvatarFallback className="bg-blue-100 text-blue-700">
                 {patient.name.split(' ').map(n => n[0]).join('')}
               </AvatarFallback>
             </Avatar>
-            <div>
-              <h3 className="font-semibold text-gray-900">{patient.name}</h3>
+            <div className="min-w-0 flex-1">
+              <h3 className="font-semibold text-gray-900 truncate">{patient.name}</h3>
               <div className="flex items-center space-x-2 text-sm text-gray-500">
                 {channel === 'sms' && patient.phone && (
-                  <span>{patient.phone}</span>
+                  <span className="truncate">{patient.phone}</span>
                 )}
                 {channel === 'email' && patient.email && (
-                  <span>{patient.email}</span>
+                  <span className="truncate">{patient.email}</span>
                 )}
-                <Badge variant="secondary" className="text-xs">
+                <Badge variant="secondary" className="text-xs flex-shrink-0">
                   {channel.toUpperCase()}
                 </Badge>
               </div>
-
             </div>
           </div>
           
-          <div className="flex items-center space-x-2">
-            <ChannelSelector 
-              selectedChannel={channel}
-              onChannelChange={() => {}} // Channel changing handled at parent level
-            />
+          <div className="flex items-center space-x-1 md:space-x-2 flex-shrink-0">
+            <div className="hidden sm:block">
+              <ChannelSelector 
+                selectedChannel={channel}
+                onChannelChange={() => {}} // Channel changing handled at parent level
+              />
+            </div>
             <Button 
               variant="outline" 
               size="sm"
+              className="touch-target"
               onClick={() => {
                 if (patient.phone) {
                   window.open(`tel:${patient.phone}`, '_self');
@@ -864,6 +866,7 @@ export const MessageArea = ({ patient, channel, onMessageSent }: MessageAreaProp
             <Button 
               variant="outline" 
               size="sm"
+              className="touch-target hidden sm:flex"
               onClick={() => {
                 toast({
                   title: "Video Call",
@@ -878,7 +881,7 @@ export const MessageArea = ({ patient, channel, onMessageSent }: MessageAreaProp
       </div>
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-1">
+      <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-1">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
@@ -915,15 +918,15 @@ export const MessageArea = ({ patient, channel, onMessageSent }: MessageAreaProp
       </div>
 
                 {/* Enhanced Input Area */}
-      <div className="bg-white border-t border-gray-200 p-4">
-        <div className="flex items-end space-x-3">
+      <div className="bg-white border-t border-gray-200 p-3 md:p-4">
+        <div className="flex items-end space-x-2 md:space-x-3">
           <div className="flex-1">
             <Input
               value={newMessage}
               onChange={(e) => setNewMessage(e.target.value)}
               onKeyPress={handleKeyPress}
               placeholder={`Send a message to ${patient.name}...`}
-              className="resize-none border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl"
+              className="resize-none border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl text-base" 
               disabled={isLoading}
             />
           </div>
@@ -931,7 +934,7 @@ export const MessageArea = ({ patient, channel, onMessageSent }: MessageAreaProp
             onClick={triggerReadReceipts}
             variant="outline"
             size="sm"
-            className="rounded-xl px-3 py-2 h-auto text-xs"
+            className="rounded-xl px-2 md:px-3 py-2 h-auto text-xs hidden md:flex"
             title="Force read receipts for testing"
           >
             📖 Read
@@ -940,7 +943,7 @@ export const MessageArea = ({ patient, channel, onMessageSent }: MessageAreaProp
             onClick={handleSendMessage}
             disabled={!newMessage.trim() || isLoading}
             size="sm"
-            className="rounded-xl px-4 py-2 h-auto"
+            className="rounded-xl px-3 md:px-4 py-2 h-auto touch-target"
           >
             {isLoading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -949,7 +952,7 @@ export const MessageArea = ({ patient, channel, onMessageSent }: MessageAreaProp
             )}
           </Button>
         </div>
-        <p className="text-xs text-gray-500 mt-2">
+        <p className="text-xs text-gray-500 mt-2 hidden md:block">
           Press Enter to send • {channel === 'sms' ? 'SMS' : channel.toUpperCase()} message • Click "📖 Read" to simulate patient reading YOUR messages (blue ✓✓)
         </p>
       </div>

@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
 import { 
   MessageSquare, 
@@ -32,7 +33,9 @@ import {
   RefreshCw,
   Star,
   Heart,
-  LogOut
+  LogOut,
+  Menu,
+  X
 } from "lucide-react";
 import { PatientList } from "@/components/PatientList";
 import { MessageArea } from "@/components/MessageArea";
@@ -65,6 +68,23 @@ interface ConversationData {
   lastActivity: string;
 }
 
+interface PhoneNumberGroup {
+  phoneNumber: string;
+  displayName: string;
+  conversations: ConversationData[];
+  totalUnreadCount: number;
+  lastActivity: string;
+}
+
+interface PhoneNumberConfig {
+  id: string;
+  phone_number: string;
+  display_name: string;
+  is_active: boolean;
+  is_primary: boolean;
+  department: string;
+}
+
 export default function Index() {
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [selectedChannel, setSelectedChannel] = useState("sms");
@@ -77,6 +97,9 @@ export default function Index() {
   const [showNewMessageDialog, setShowNewMessageDialog] = useState(false);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [conversations, setConversations] = useState<ConversationData[]>([]);
+  const [phoneNumberGroups, setPhoneNumberGroups] = useState<PhoneNumberGroup[]>([]);
+  const [phoneNumbers, setPhoneNumbers] = useState<PhoneNumberConfig[]>([]);
+  const [selectedPhoneNumber, setSelectedPhoneNumber] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [stats, setStats] = useState({
@@ -87,6 +110,7 @@ export default function Index() {
   });
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { toast } = useToast();
 
   // Save activeTab to localStorage whenever it changes
@@ -239,6 +263,26 @@ export default function Index() {
     fetchStats(); // Refresh stats
   };
 
+  const fetchPhoneNumbers = async () => {
+    try {
+      const { data: phoneNumbersData, error } = await supabase
+        .from('twilio_phone_numbers')
+        .select('id, phone_number, display_name, is_active, is_primary, department')
+        .eq('is_active', true)
+        .order('is_primary', { ascending: false });
+
+      if (error) throw error;
+      setPhoneNumbers(phoneNumbersData || []);
+    } catch (error) {
+      console.error('Error fetching phone numbers:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load phone numbers",
+        variant: "destructive",
+      });
+    }
+  };
+
   const fetchConversations = async () => {
     try {
       // Get all patients
@@ -249,17 +293,31 @@ export default function Index() {
 
       if (patientsError) throw patientsError;
 
-      // For each patient, get their last message and unread count
+      // Get all phone numbers
+      const { data: phoneNumbersData, error: phoneNumbersError } = await supabase
+        .from('twilio_phone_numbers')
+        .select('id, phone_number, display_name, is_active, is_primary, department')
+        .eq('is_active', true);
+
+      if (phoneNumbersError) throw phoneNumbersError;
+
+      // Create a map of phone numbers for quick lookup
+      const phoneNumberMap = new Map<string, PhoneNumberConfig>();
+      phoneNumbersData?.forEach(pn => {
+        phoneNumberMap.set(pn.phone_number, pn);
+      });
+
+      // Create phone number groups
+      const phoneGroups: PhoneNumberGroup[] = [];
       const conversationsData: ConversationData[] = [];
       
       for (const patient of patientsData || []) {
-        // Get last message
-        const { data: lastMessageData } = await supabase
+        // Get messages for this patient with phone number info
+        const { data: messagesData } = await supabase
           .from('messages')
-          .select('content, created_at, direction, sender_name')
+          .select('content, created_at, direction, sender_name, twilio_number_from, twilio_number_to')
           .eq('patient_id', patient.id)
-          .order('created_at', { ascending: false })
-          .limit(1);
+          .order('created_at', { ascending: false });
 
         // Get unread count (inbound messages that are not read)
         const { count: unreadCount } = await supabase
@@ -269,37 +327,78 @@ export default function Index() {
           .eq('direction', 'inbound')
           .or('is_read.is.null,is_read.eq.false');
 
-        const lastMessage = lastMessageData?.[0];
+        const lastMessage = messagesData?.[0];
         
-        // Only use actual message timestamps, not patient creation dates for conversations
         if (lastMessage) {
-          // Patient has messages - use the actual message timestamp
-          const lastActivity = lastMessage.created_at;
+          // Determine which of our phone numbers was used
+          const ourPhoneNumber = lastMessage.direction === 'inbound' 
+            ? lastMessage.twilio_number_to  // For inbound, our number is the recipient
+            : lastMessage.twilio_number_from; // For outbound, our number is the sender
 
-          conversationsData.push({
-            patient,
-            lastMessage,
-            unreadCount: unreadCount || 0,
-            lastActivity
+          // Get all messages for this patient-phone combination
+          const phoneMessages = messagesData.filter(msg => {
+            const phoneUsed = msg.direction === 'inbound' 
+              ? msg.twilio_number_to 
+              : msg.twilio_number_from;
+            return phoneUsed === ourPhoneNumber;
           });
-        } else {
-          // Patient has no messages - use patient creation date but mark differently
-          const lastActivity = patient.created_at;
 
-          conversationsData.push({
-            patient,
-            lastMessage: undefined, // No last message
-            unreadCount: unreadCount || 0,
-            lastActivity
-          });
+          // Use the latest message from this phone number combination
+          const phoneLastMessage = phoneMessages[0];
+          
+          if (phoneLastMessage) {
+            const conversation: ConversationData = {
+              patient,
+              lastMessage: {
+                content: phoneLastMessage.content,
+                created_at: phoneLastMessage.created_at,
+                direction: phoneLastMessage.direction,
+                sender_name: phoneLastMessage.sender_name
+              },
+              unreadCount: unreadCount || 0,
+              lastActivity: phoneLastMessage.created_at
+            };
+
+            conversationsData.push(conversation);
+
+            // Find or create phone number group
+            let phoneGroup = phoneGroups.find(pg => pg.phoneNumber === ourPhoneNumber);
+            if (!phoneGroup) {
+              const phoneConfig = phoneNumberMap.get(ourPhoneNumber);
+              phoneGroup = {
+                phoneNumber: ourPhoneNumber,
+                displayName: phoneConfig?.display_name || ourPhoneNumber,
+                conversations: [],
+                totalUnreadCount: 0,
+                lastActivity: phoneLastMessage.created_at
+              };
+              phoneGroups.push(phoneGroup);
+            }
+
+            phoneGroup.conversations.push(conversation);
+            phoneGroup.totalUnreadCount += unreadCount || 0;
+            
+            // Update last activity if this conversation is more recent
+            if (new Date(phoneLastMessage.created_at) > new Date(phoneGroup.lastActivity)) {
+              phoneGroup.lastActivity = phoneLastMessage.created_at;
+            }
+          }
         }
       }
 
-      // Sort by last activity (most recent first)
-      conversationsData.sort((a, b) => 
+      // Sort conversations within each phone group by last activity
+      phoneGroups.forEach(group => {
+        group.conversations.sort((a, b) => 
+          new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
+        );
+      });
+
+      // Sort phone groups by last activity
+      phoneGroups.sort((a, b) => 
         new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
       );
 
+      setPhoneNumberGroups(phoneGroups);
       setConversations(conversationsData);
       setPatients(patientsData || []);
     } catch (error) {
@@ -376,6 +475,27 @@ export default function Index() {
       : `${prefix}${content}`;
   };
 
+  const filteredPhoneNumberGroups = phoneNumberGroups.filter(group => {
+    // Filter by selected phone number
+    if (selectedPhoneNumber !== "all" && group.phoneNumber !== selectedPhoneNumber) {
+      return false;
+    }
+    
+    // Filter conversations within the group by search query
+    const searchLower = searchQuery.toLowerCase();
+    group.conversations = group.conversations.filter(conv => {
+      return (
+        conv.patient.name.toLowerCase().includes(searchLower) ||
+        (conv.patient.phone && conv.patient.phone.includes(searchLower)) ||
+        (conv.patient.email && conv.patient.email.toLowerCase().includes(searchLower)) ||
+        (conv.lastMessage && conv.lastMessage.content.toLowerCase().includes(searchLower))
+      );
+    });
+    
+    // Only include groups that have conversations after filtering
+    return group.conversations.length > 0;
+  });
+
   const filteredConversations = conversations.filter(conv => {
     const searchLower = searchQuery.toLowerCase();
     return (
@@ -388,6 +508,7 @@ export default function Index() {
 
   useEffect(() => {
     if (activeTab === "messages") {
+      fetchPhoneNumbers();
       fetchConversations();
     }
   }, [activeTab]);
@@ -428,23 +549,175 @@ export default function Index() {
     fetchConversations();
   };
 
+  const handleTabChange = (newTab: string) => {
+    setActiveTab(newTab);
+    setMobileMenuOpen(false); // Close mobile menu when tab changes
+  };
+
+  // Reusable Sidebar Content
+  const SidebarContent = () => (
+    <>
+      {/* Logo */}
+      <div className="p-6 border-b border-gray-200">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm p-1">
+            <img 
+              src="/narayan-logo.png" 
+              alt="Narayan Pharmacy Logo" 
+              className="w-full h-full object-contain"
+              onError={(e) => {
+                // Fallback to background with initials if image fails to load
+                e.currentTarget.style.display = 'none';
+                e.currentTarget.parentElement!.innerHTML = '<div class="w-full h-full bg-gradient-to-br from-red-500 to-red-700 rounded-lg flex items-center justify-center text-white font-bold text-sm">N</div>';
+              }}
+            />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">Narayan Pharmacy</h2>
+            <p className="text-xs text-gray-500">MedConnect Platform</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 p-4">
+        <div className="space-y-2">
+          <Button
+            variant={activeTab === "dashboard" ? "default" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => handleTabChange("dashboard")}
+          >
+            <BarChart3 className="w-4 h-4 mr-3" />
+            Dashboard
+          </Button>
+          
+          <Button
+            variant={activeTab === "messages" ? "default" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => handleTabChange("messages")}
+          >
+            <MessageSquare className="w-4 h-4 mr-3" />
+            Messages
+            {stats.activeConversations > 0 && (
+              <Badge variant="secondary" className="ml-auto">
+                {stats.activeConversations}
+              </Badge>
+            )}
+          </Button>
+          
+          <Button
+            variant={activeTab === "contacts" ? "default" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => handleTabChange("contacts")}
+          >
+            <Users className="w-4 h-4 mr-3" />
+            Contacts
+            <Badge variant="secondary" className="ml-auto">
+              {stats.totalPatients}
+            </Badge>
+          </Button>
+          
+          <Button
+            variant={activeTab === "sms" ? "default" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => handleTabChange("sms")}
+          >
+            <Send className="w-4 h-4 mr-3" />
+            SMS Manager
+          </Button>
+          
+          <Button
+            variant={activeTab === "analytics" ? "default" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => handleTabChange("analytics")}
+          >
+            <TrendingUp className="w-4 h-4 mr-3" />
+            Analytics
+          </Button>
+          
+          <Button
+            variant={activeTab === "team" ? "default" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => handleTabChange("team")}
+          >
+            <Users className="w-4 h-4 mr-3" />
+            Team
+          </Button>
+          
+          <Button
+            variant={activeTab === "automation" ? "default" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => handleTabChange("automation")}
+          >
+            <Zap className="w-4 h-4 mr-3" />
+            Automation
+          </Button>
+          
+          <Button
+            variant={activeTab === "omnichannel" ? "default" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => handleTabChange("omnichannel")}
+          >
+            <MessageSquare className="w-4 h-4 mr-3" />
+            Omnichannel
+          </Button>
+          
+          {currentUser?.role === 'admin' && (
+            <Button
+              variant={activeTab === "admin" ? "default" : "ghost"}
+              className="w-full justify-start"
+              onClick={() => handleTabChange("admin")}
+            >
+              <Shield className="w-4 h-4 mr-3" />
+              Admin
+            </Button>
+          )}
+        </div>
+      </nav>
+
+      {/* User Profile */}
+      <div className="p-4 border-t border-gray-200">
+        <div className="flex items-center space-x-3">
+          <Avatar>
+            <AvatarFallback className="bg-blue-600 text-white">
+              {currentUser?.first_name?.[0]}{currentUser?.last_name?.[0] || currentUser?.first_name?.[1]}
+            </AvatarFallback>
+          </Avatar>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-gray-900 truncate">
+              {currentUser?.first_name} {currentUser?.last_name}
+            </p>
+            <p className="text-xs text-gray-500 truncate capitalize">
+              {currentUser?.role?.replace('_', ' ')}
+            </p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={handleLogout} title="Logout">
+            <LogOut className="w-4 h-4" />
+          </Button>
+        </div>
+      </div>
+    </>
+  );
+
   // Main Dashboard
   const Dashboard = () => (
-    <div className="p-6 space-y-6">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between space-y-3 sm:space-y-0">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Healthcare Communication Hub</h1>
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Healthcare Communication Hub</h1>
           <p className="text-gray-600">Manage patient communications across all channels</p>
         </div>
-        <div className="flex items-center space-x-3">
-          <Button variant="outline" size="sm">
+        <div className="flex items-center space-x-2 md:space-x-3 w-full sm:w-auto">
+          <Button variant="outline" size="sm" className="flex-1 sm:flex-none">
             <Download className="w-4 h-4 mr-2" />
-            Export Data
+            <span className="hidden sm:inline">Export Data</span>
+            <span className="sm:hidden">Export</span>
           </Button>
-          <Button className="bg-blue-600 hover:bg-blue-700">
+          <Button className="bg-blue-600 hover:bg-blue-700 flex-1 sm:flex-none">
             <UserPlus className="w-4 h-4 mr-2" />
-            Add Patient
+            <span className="hidden sm:inline">Add Patient</span>
+            <span className="sm:hidden">Add</span>
           </Button>
         </div>
       </div>
@@ -505,25 +778,25 @@ export default function Index() {
       </div>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
         <Card>
           <CardHeader>
             <CardTitle>Quick Actions</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <Button className="w-full justify-start" variant="outline" onClick={() => setActiveTab("messages")}>
+          <CardContent className="space-y-3 md:space-y-4">
+            <Button className="w-full justify-start touch-target" variant="outline" onClick={() => handleTabChange("messages")}>
               <MessageSquare className="w-4 h-4 mr-2" />
               Start New Conversation
             </Button>
-            <Button className="w-full justify-start" variant="outline" onClick={() => setActiveTab("sms")}>
+            <Button className="w-full justify-start touch-target" variant="outline" onClick={() => handleTabChange("sms")}>
               <Send className="w-4 h-4 mr-2" />
               Send Bulk SMS
             </Button>
-            <Button className="w-full justify-start" variant="outline" onClick={() => setActiveTab("contacts")}>
+            <Button className="w-full justify-start touch-target" variant="outline" onClick={() => handleTabChange("contacts")}>
               <Users className="w-4 h-4 mr-2" />
               Manage Contacts
             </Button>
-            <Button className="w-full justify-start" variant="outline" onClick={() => setActiveTab("analytics")}>
+            <Button className="w-full justify-start touch-target" variant="outline" onClick={() => handleTabChange("analytics")}>
               <BarChart3 className="w-4 h-4 mr-2" />
               View Analytics
             </Button>
@@ -563,26 +836,26 @@ export default function Index() {
       </div>
 
       {/* Feature Highlights */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
         <Card className="border-blue-200 bg-blue-50">
-          <CardContent className="p-6 text-center">
-            <Shield className="w-12 h-12 text-blue-600 mx-auto mb-4" />
+          <CardContent className="p-4 md:p-6 text-center">
+            <Shield className="w-10 h-10 md:w-12 md:h-12 text-blue-600 mx-auto mb-3 md:mb-4" />
             <h3 className="font-semibold text-blue-900 mb-2">HIPAA Compliant</h3>
             <p className="text-sm text-blue-700">End-to-end encryption and secure messaging</p>
           </CardContent>
         </Card>
         
         <Card className="border-green-200 bg-green-50">
-          <CardContent className="p-6 text-center">
-            <Zap className="w-12 h-12 text-green-600 mx-auto mb-4" />
+          <CardContent className="p-4 md:p-6 text-center">
+            <Zap className="w-10 h-10 md:w-12 md:h-12 text-green-600 mx-auto mb-3 md:mb-4" />
             <h3 className="font-semibold text-green-900 mb-2">Multi-Channel</h3>
             <p className="text-sm text-green-700">SMS, Email, and WhatsApp integration</p>
           </CardContent>
         </Card>
         
         <Card className="border-purple-200 bg-purple-50">
-          <CardContent className="p-6 text-center">
-            <Activity className="w-12 h-12 text-purple-600 mx-auto mb-4" />
+          <CardContent className="p-4 md:p-6 text-center">
+            <Activity className="w-10 h-10 md:w-12 md:h-12 text-purple-600 mx-auto mb-3 md:mb-4" />
             <h3 className="font-semibold text-purple-900 mb-2">Real-time Analytics</h3>
             <p className="text-sm text-purple-700">Track engagement and response rates</p>
           </CardContent>
@@ -598,156 +871,41 @@ export default function Index() {
 
   return (
     <div className="h-screen flex bg-gray-50">
-      {/* Sidebar Navigation */}
-      <div className="w-64 bg-white border-r border-gray-200 flex flex-col">
-        {/* Logo */}
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm p-1">
-              <img 
-                src="/narayan-logo.png" 
-                alt="Narayan Pharmacy Logo" 
-                className="w-full h-full object-contain"
-                onError={(e) => {
-                  // Fallback to background with initials if image fails to load
-                  e.currentTarget.style.display = 'none';
-                  e.currentTarget.parentElement!.innerHTML = '<div class="w-full h-full bg-gradient-to-br from-red-500 to-red-700 rounded-lg flex items-center justify-center text-white font-bold text-sm">N</div>';
-                }}
-              />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-gray-900">Narayan Pharmacy</h2>
-              <p className="text-xs text-gray-500">MedConnect Platform</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Navigation */}
-        <nav className="flex-1 p-4">
-          <div className="space-y-2">
-            <Button
-              variant={activeTab === "dashboard" ? "default" : "ghost"}
-              className="w-full justify-start"
-              onClick={() => setActiveTab("dashboard")}
-            >
-              <BarChart3 className="w-4 h-4 mr-3" />
-              Dashboard
-            </Button>
-            
-            <Button
-              variant={activeTab === "messages" ? "default" : "ghost"}
-              className="w-full justify-start"
-              onClick={() => setActiveTab("messages")}
-            >
-              <MessageSquare className="w-4 h-4 mr-3" />
-              Messages
-              {stats.activeConversations > 0 && (
-                <Badge variant="secondary" className="ml-auto">
-                  {stats.activeConversations}
-                </Badge>
-              )}
-            </Button>
-            
-            <Button
-              variant={activeTab === "contacts" ? "default" : "ghost"}
-              className="w-full justify-start"
-              onClick={() => setActiveTab("contacts")}
-            >
-              <Users className="w-4 h-4 mr-3" />
-              Contacts
-              <Badge variant="secondary" className="ml-auto">
-                {stats.totalPatients}
-              </Badge>
-            </Button>
-            
-            <Button
-              variant={activeTab === "sms" ? "default" : "ghost"}
-              className="w-full justify-start"
-              onClick={() => setActiveTab("sms")}
-            >
-              <Send className="w-4 h-4 mr-3" />
-              SMS Manager
-            </Button>
-            
-            <Button
-              variant={activeTab === "analytics" ? "default" : "ghost"}
-              className="w-full justify-start"
-              onClick={() => setActiveTab("analytics")}
-            >
-              <TrendingUp className="w-4 h-4 mr-3" />
-              Analytics
-            </Button>
-            
-            <Button
-              variant={activeTab === "team" ? "default" : "ghost"}
-              className="w-full justify-start"
-              onClick={() => setActiveTab("team")}
-            >
-              <Users className="w-4 h-4 mr-3" />
-              Team
-            </Button>
-            
-            <Button
-              variant={activeTab === "automation" ? "default" : "ghost"}
-              className="w-full justify-start"
-              onClick={() => setActiveTab("automation")}
-            >
-              <Zap className="w-4 h-4 mr-3" />
-              Automation
-            </Button>
-            
-            <Button
-              variant={activeTab === "omnichannel" ? "default" : "ghost"}
-              className="w-full justify-start"
-              onClick={() => setActiveTab("omnichannel")}
-            >
-              <MessageSquare className="w-4 h-4 mr-3" />
-              Omnichannel
-            </Button>
-            
-            {currentUser?.role === 'admin' && (
-              <Button
-                variant={activeTab === "admin" ? "default" : "ghost"}
-                className="w-full justify-start"
-                onClick={() => setActiveTab("admin")}
-              >
-                <Shield className="w-4 h-4 mr-3" />
-                Admin
-              </Button>
-            )}
-          </div>
-        </nav>
-
-        {/* User Profile */}
-        <div className="p-4 border-t border-gray-200">
-          <div className="flex items-center space-x-3">
-            <Avatar>
-              <AvatarFallback className="bg-blue-600 text-white">
-                {currentUser?.first_name?.[0]}{currentUser?.last_name?.[0] || currentUser?.first_name?.[1]}
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 truncate">
-                {currentUser?.first_name} {currentUser?.last_name}
-              </p>
-              <p className="text-xs text-gray-500 truncate capitalize">
-                {currentUser?.role?.replace('_', ' ')}
-              </p>
-            </div>
-            <Button variant="ghost" size="sm" onClick={handleLogout} title="Logout">
-              <LogOut className="w-4 h-4" />
-            </Button>
-          </div>
-        </div>
+      {/* Desktop Sidebar - Hidden on Mobile */}
+      <div className="hidden md:flex w-64 bg-white border-r border-gray-200 flex-col">
+        <SidebarContent />
       </div>
+
+      {/* Mobile Sidebar Drawer */}
+      <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+        <SheetTrigger asChild>
+          {/* This trigger is not visible but needed for Sheet functionality */}
+          <button style={{ display: 'none' }} />
+        </SheetTrigger>
+        <SheetContent side="left" className="w-64 p-0">
+          <div className="h-full bg-white flex flex-col">
+            <SidebarContent />
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top Bar */}
-        <div className="bg-white border-b border-gray-200 px-6 py-4">
+        <div className="bg-white border-b border-gray-200 px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
-              <h1 className="text-xl font-semibold text-gray-900 capitalize">
+              {/* Mobile Menu Button */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="md:hidden"
+                onClick={() => setMobileMenuOpen(true)}
+              >
+                <Menu className="w-5 h-5" />
+              </Button>
+              
+              <h1 className="text-lg md:text-xl font-semibold text-gray-900 capitalize">
                 {activeTab === "dashboard" ? "Dashboard" : 
                  activeTab === "messages" ? "Messages" :
                  activeTab === "contacts" ? "Patient Contacts" :
@@ -760,15 +918,16 @@ export default function Index() {
               </h1>
             </div>
             
-            <div className="flex items-center space-x-3">
-              <div className="relative">
+            <div className="flex items-center space-x-2 md:space-x-3">
+              {/* Search - Hidden on small mobile, visible on tablet+ */}
+              <div className="relative hidden sm:block">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <Input placeholder="Search..." className="pl-10 w-64" />
+                <Input placeholder="Search..." className="pl-10 w-32 md:w-64" />
               </div>
               <Button variant="outline" size="sm">
                 <Bell className="w-4 h-4" />
               </Button>
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" className="hidden sm:flex">
                 <RefreshCw className="w-4 h-4" />
               </Button>
             </div>
@@ -780,12 +939,17 @@ export default function Index() {
           {activeTab === "dashboard" && <Dashboard />}
           
           {activeTab === "messages" && (
-            <div className="h-full flex">
-              <div className="w-96 bg-white border-r border-gray-200">
+            <div className="h-full flex flex-col md:flex-row">
+              {/* Conversations List - Full width on mobile, fixed width on desktop */}
+              <div className={`bg-white border-r border-gray-200 ${
+                selectedPatient 
+                  ? 'hidden md:block md:w-96' 
+                  : 'flex-1 md:w-96'
+              }`}>
                 <div className="h-full flex flex-col">
                   {/* Messages Header */}
-                  <div className="p-4 border-b border-gray-200">
-                    <div className="flex items-center justify-between mb-4">
+                  <div className="p-3 md:p-4 border-b border-gray-200">
+                    <div className="flex items-center justify-between mb-3 md:mb-4">
                       <div className="flex items-center space-x-2">
                         <MessageSquare className="w-5 h-5 text-blue-600" />
                         <h2 className="text-lg font-semibold text-gray-900">Messages</h2>
@@ -794,10 +958,11 @@ export default function Index() {
                       <Button 
                         onClick={() => setShowNewMessageDialog(true)}
                         size="sm"
-                        className="bg-blue-600 hover:bg-blue-700"
+                        className="bg-blue-600 hover:bg-blue-700 touch-target"
                       >
-                        <Plus className="w-4 h-4 mr-2" />
-                        New Message
+                        <Plus className="w-4 h-4 mr-1 md:mr-2" />
+                        <span className="hidden sm:inline">New Message</span>
+                        <span className="sm:hidden">New</span>
                       </Button>
                     </div>
                     
@@ -806,16 +971,33 @@ export default function Index() {
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                       <Input
                         placeholder="Search conversations..."
-                        className="pl-10"
+                        className="pl-10 text-base" 
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                       />
+                    </div>
+                    
+                    {/* Phone Number Filter */}
+                    <div className="flex items-center space-x-2">
+                      <Phone className="w-4 h-4 text-gray-400" />
+                      <select
+                        value={selectedPhoneNumber}
+                        onChange={(e) => setSelectedPhoneNumber(e.target.value)}
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      >
+                        <option value="all">All Phone Numbers</option>
+                        {phoneNumbers.map((phone) => (
+                          <option key={phone.id} value={phone.phone_number}>
+                            {phone.display_name} ({phone.phone_number})
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
 
                   {/* Conversations List */}
                   <div className="flex-1 overflow-y-auto">
-                    {filteredConversations.length === 0 ? (
+                    {filteredPhoneNumberGroups.length === 0 ? (
                       <div className="flex flex-col items-center justify-center h-full p-8 text-center">
                         <MessageSquare className="w-12 h-12 text-gray-400 mb-4" />
                         <h3 className="font-medium text-gray-900 mb-2">
@@ -828,97 +1010,136 @@ export default function Index() {
                           <Button 
                             onClick={() => setShowNewMessageDialog(true)}
                             size="sm"
-                            className="bg-blue-600 hover:bg-blue-700"
+                            className="bg-blue-600 hover:bg-blue-700 touch-target"
                           >
                             <Plus className="w-4 h-4 mr-2" />
-                            Start First Conversation
+                            <span className="hidden sm:inline">Start First Conversation</span>
+                            <span className="sm:hidden">Start Chat</span>
                           </Button>
                         )}
                       </div>
                     ) : (
-                      <div className="divide-y divide-gray-100">
-                        {filteredConversations.map((conversation) => {
-                          const isSelected = selectedPatient?.id === conversation.patient.id;
-                          
-                          return (
-                            <div
-                              key={conversation.patient.id}
-                              onClick={() => {
-                                handlePatientSelect(conversation.patient);
-                                handleRefreshConversations(); // Refresh to update unread counts
-                              }}
-                              className={`p-4 hover:bg-gray-50 cursor-pointer transition-colors ${
-                                isSelected ? "bg-blue-50 border-r-2 border-blue-600" : ""
-                              }`}
-                            >
-                              <div className="flex items-start space-x-3">
-                                <div className="relative">
-                                  <Avatar className="w-12 h-12">
-                                    <AvatarFallback className="bg-blue-600 text-white font-medium">
-                                      {conversation.patient.name.split(' ').map(n => n[0]).join('')}
-                                    </AvatarFallback>
-                                  </Avatar>
-                                  {conversation.unreadCount > 0 && (
-                                    <div className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                                      {conversation.unreadCount > 9 ? '9+' : conversation.unreadCount}
-                                    </div>
-                                  )}
+                      <div>
+                        {filteredPhoneNumberGroups.map((phoneGroup) => (
+                          <div key={phoneGroup.phoneNumber} className="border-b border-gray-200">
+                            {/* Phone Number Header */}
+                            <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center space-x-2">
+                                  <Phone className="w-4 h-4 text-blue-600" />
+                                  <span className="font-medium text-gray-900 text-sm">
+                                    {phoneGroup.displayName}
+                                  </span>
+                                  <span className="text-xs text-gray-500">
+                                    {phoneGroup.phoneNumber}
+                                  </span>
                                 </div>
-                                
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center justify-between mb-1">
-                                    <h3 className={`font-medium truncate ${
-                                      conversation.unreadCount > 0 ? 'text-gray-900' : 'text-gray-700'
-                                    }`}>
-                                      {conversation.patient.name}
-                                    </h3>
-                                    <span className="text-xs text-gray-500 ml-2 flex-shrink-0">
-                                      {conversation.lastMessage 
-                                        ? formatLastMessageTime(conversation.lastActivity)
-                                        : "New patient"
-                                      }
-                                    </span>
-                                  </div>
-                                  
-                                  <p className={`text-sm truncate mb-2 ${
-                                    conversation.unreadCount > 0 ? 'text-gray-900 font-medium' : 'text-gray-500'
-                                  }`}>
-                                    {getLastMessagePreview(conversation)}
-                                  </p>
-                                  
-                                  <div className="flex items-center justify-between">
-                                    <div className="flex items-center space-x-1">
-                                      <Badge 
-                                        variant="secondary" 
-                                        className="text-xs"
-                                      >
-                                        {conversation.patient.preferred_channel.toUpperCase()}
-                                      </Badge>
-                                      {conversation.patient.phone && (
-                                        <Phone className="w-3 h-3 text-gray-400" />
-                                      )}
-                                      {conversation.patient.email && (
-                                        <Mail className="w-3 h-3 text-gray-400" />
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
+                                {phoneGroup.totalUnreadCount > 0 && (
+                                  <Badge variant="destructive" className="text-xs">
+                                    {phoneGroup.totalUnreadCount}
+                                  </Badge>
+                                )}
                               </div>
                             </div>
-                          );
-                        })}
+                            
+                            {/* Conversations in this phone group */}
+                            <div className="divide-y divide-gray-100">
+                              {phoneGroup.conversations.map((conversation) => {
+                                const isSelected = selectedPatient?.id === conversation.patient.id;
+                                
+                                return (
+                                  <div
+                                    key={conversation.patient.id}
+                                    onClick={() => {
+                                      handlePatientSelect(conversation.patient);
+                                      handleRefreshConversations(); // Refresh to update unread counts
+                                    }}
+                                    className={`p-3 md:p-4 hover:bg-gray-50 cursor-pointer transition-colors touch-target ${
+                                      isSelected ? "bg-blue-50 border-r-2 border-blue-600" : ""
+                                    }`}
+                                  >
+                                    <div className="flex items-start space-x-3">
+                                      <div className="relative">
+                                        <Avatar className="w-12 h-12">
+                                          <AvatarFallback className="bg-blue-600 text-white font-medium">
+                                            {conversation.patient.name.split(' ').map(n => n[0]).join('')}
+                                          </AvatarFallback>
+                                        </Avatar>
+                                        {conversation.unreadCount > 0 && (
+                                          <div className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                                            {conversation.unreadCount > 9 ? '9+' : conversation.unreadCount}
+                                          </div>
+                                        )}
+                                      </div>
+                                      
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center justify-between mb-1">
+                                          <h3 className={`font-medium truncate ${
+                                            conversation.unreadCount > 0 ? 'text-gray-900' : 'text-gray-700'
+                                          }`}>
+                                            {conversation.patient.name}
+                                          </h3>
+                                          <span className="text-xs text-gray-500 ml-2 flex-shrink-0">
+                                            {conversation.lastMessage 
+                                              ? formatLastMessageTime(conversation.lastActivity)
+                                              : "New patient"
+                                            }
+                                          </span>
+                                        </div>
+                                        
+                                        <p className={`text-sm truncate mb-2 ${
+                                          conversation.unreadCount > 0 ? 'text-gray-900 font-medium' : 'text-gray-500'
+                                        }`}>
+                                          {getLastMessagePreview(conversation)}
+                                        </p>
+                                        
+                                        <div className="flex items-center justify-between">
+                                          <div className="flex items-center space-x-1">
+                                            <Badge 
+                                              variant="secondary" 
+                                              className="text-xs"
+                                            >
+                                              {conversation.patient.preferred_channel.toUpperCase()}
+                                            </Badge>
+                                            {conversation.patient.phone && (
+                                              <Phone className="w-3 h-3 text-gray-400" />
+                                            )}
+                                            {conversation.patient.email && (
+                                              <Mail className="w-3 h-3 text-gray-400" />
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
                 </div>
               </div>
-              <div className="flex-1 flex">
+              {/* Chat Area - Full width on mobile when patient selected */}
+              <div className={`flex-1 flex ${selectedPatient ? 'flex' : 'hidden md:flex'}`}>
                 <div className="flex-1">
                   {selectedPatient ? (
                     <div className="h-full flex flex-col">
                       {/* Chat Header with Patient Info Toggle */}
                       <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white">
                         <div className="flex items-center space-x-3">
+                          {/* Mobile Back Button */}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="md:hidden"
+                            onClick={() => setSelectedPatient(null)}
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                          
                           <Avatar className="w-10 h-10">
                             <AvatarFallback className="bg-blue-600 text-white font-medium">
                               {selectedPatient.name.split(' ').map(n => n[0]).join('')}
@@ -940,6 +1161,7 @@ export default function Index() {
                             size="sm"
                             onClick={() => setShowPatientProfile(!showPatientProfile)}
                             title="Patient details"
+                            className="hidden sm:flex"
                           >
                             Patient Info
                           </Button>
@@ -965,9 +1187,9 @@ export default function Index() {
                   )}
                 </div>
                 
-                {/* Patient Profile Sidebar */}
+                {/* Patient Profile Sidebar - Desktop only */}
                 {showPatientProfile && selectedPatient && (
-                  <div className="w-80 border-l border-gray-200 bg-white">
+                  <div className="hidden sm:block w-80 border-l border-gray-200 bg-white">
                     <div className="p-4 border-b border-gray-200">
                       <div className="flex items-center justify-between">
                         <h3 className="font-semibold text-gray-900">Patient Profile</h3>
