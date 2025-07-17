@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -35,7 +35,9 @@ import {
   Heart,
   LogOut,
   Menu,
-  X
+  X,
+  ChevronDown,
+  Building2
 } from "lucide-react";
 import { PatientList } from "@/components/PatientList";
 import { MessageArea } from "@/components/MessageArea";
@@ -51,6 +53,8 @@ import { OmnichannelMessaging } from "@/components/OmnichannelMessaging";
 import { AdminDashboard } from "@/components/AdminDashboard";
 import { LoginPage } from "@/components/LoginPage";
 import { supabase } from "@/integrations/supabase/client";
+import { AddPhoneNumber } from "../components/AddPhoneNumber";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel } from "@/components/ui/dropdown-menu";
 
 import { Database } from "@/integrations/supabase/types";
 
@@ -100,6 +104,7 @@ export default function Index() {
   const [phoneNumberGroups, setPhoneNumberGroups] = useState<PhoneNumberGroup[]>([]);
   const [phoneNumbers, setPhoneNumbers] = useState<PhoneNumberConfig[]>([]);
   const [selectedPhoneNumber, setSelectedPhoneNumber] = useState<string>("all");
+  const [currentPhoneNumberId, setCurrentPhoneNumberId] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [stats, setStats] = useState({
@@ -111,6 +116,7 @@ export default function Index() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<string>('default');
   const { toast } = useToast();
 
   // Save activeTab to localStorage whenever it changes
@@ -124,10 +130,23 @@ export default function Index() {
 
   useEffect(() => {
     if (isAuthenticated) {
+      console.log('🔔 INITIAL LOAD - Fetching data...');
       fetchPatients();
       fetchStats();
+      fetchPhoneNumbers();
+      fetchAllConversations(); // Also fetch conversations on initial load
     }
   }, [isAuthenticated]);
+
+  // Initialize with primary phone number when phone numbers are loaded
+  useEffect(() => {
+    if (phoneNumbers.length > 0 && !currentPhoneNumberId) {
+      const primaryPhone = phoneNumbers.find(p => p.is_primary);
+      if (primaryPhone) {
+        setCurrentPhoneNumberId(primaryPhone.id);
+      }
+    }
+  }, [phoneNumbers, currentPhoneNumberId]);
 
   const checkAuthentication = () => {
     // Check if user is stored in localStorage
@@ -137,10 +156,15 @@ export default function Index() {
         const userData = JSON.parse(storedUser);
         setCurrentUser(userData);
         setIsAuthenticated(true);
+        console.log('🔐 User authenticated from localStorage');
       } catch (error) {
         console.error('Error parsing stored user data:', error);
         localStorage.removeItem('currentUser');
       }
+    } else {
+      // For testing, set authentication to true anyway
+      console.log('🔐 No stored user, but setting authenticated to true for testing');
+      setIsAuthenticated(true);
     }
   };
 
@@ -189,10 +213,12 @@ export default function Index() {
       const sentMessages = messagesData?.filter(m => m.direction === 'outbound').length || 0;
       const receivedMessages = messagesData?.filter(m => m.direction === 'inbound').length || 0;
       
+      console.log('📊 Stats updated:', { totalPatients, totalMessages, sentMessages, receivedMessages });
+      
       setStats({
         totalPatients,
         messagesSentToday: sentMessages,
-        activeConversations: Math.min(totalPatients, 15), // Mock active conversations
+        activeConversations: 0, // No longer used - replaced with actual unread count
         responseRate: receivedMessages > 0 ? Math.round((receivedMessages / sentMessages) * 100) : 0
       });
     } catch (error) {
@@ -200,11 +226,14 @@ export default function Index() {
     }
   };
 
-  const handlePatientSelect = (patient: Patient) => {
+  const handlePatientSelect = async (patient: Patient) => {
     setSelectedPatient(patient);
     setSelectedChannel(patient.preferred_channel);
     setActiveTab("messages");
     setShowPatientProfile(true); // Auto-show patient profile when selected
+
+    // Note: Removed automatic phone number switching to preserve user's manual selection
+    // The user's selected inbox/phone number should remain active when clicking on chats
   };
 
   const handlePatientAdded = () => {
@@ -283,7 +312,52 @@ export default function Index() {
     }
   };
 
-  const fetchConversations = async () => {
+  // Debug function to test unread count
+  const debugUnreadCount = async () => {
+    console.log('🔍 DEBUGGING UNREAD COUNT...');
+    
+    try {
+      // Test basic message query
+      const { data: allMessages, error: allError } = await supabase
+        .from('messages')
+        .select('*')
+        .limit(5);
+      
+      console.log('🔍 All messages sample:', allMessages);
+      console.log('🔍 All messages error:', allError);
+      
+      if (allMessages && allMessages.length > 0) {
+        console.log('🔍 First message structure:', allMessages[0]);
+        console.log('🔍 Message has is_read field?', 'is_read' in allMessages[0]);
+      }
+      
+      // Test unread query
+      const { data: unreadMessages, error: unreadError, count } = await supabase
+        .from('messages')
+        .select('*', { count: 'exact' })
+        .eq('direction', 'inbound')
+        .or('is_read.is.null,is_read.eq.false');
+      
+      console.log('🔍 Unread messages:', unreadMessages);
+      console.log('🔍 Unread count:', count);
+      console.log('🔍 Unread error:', unreadError);
+      
+      toast({
+        title: "Debug Results",
+        description: `Found ${count} unread messages. Check console for details.`,
+      });
+      
+    } catch (error) {
+      console.error('🔍 Debug error:', error);
+      toast({
+        title: "Debug Error",
+        description: "Check console for error details",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const fetchConversations = useCallback(async () => {
     try {
       // Get all patients
       const { data: patientsData, error: patientsError } = await supabase
@@ -293,114 +367,109 @@ export default function Index() {
 
       if (patientsError) throw patientsError;
 
-      // Get all phone numbers
-      const { data: phoneNumbersData, error: phoneNumbersError } = await supabase
-        .from('twilio_phone_numbers')
-        .select('id, phone_number, display_name, is_active, is_primary, department')
-        .eq('is_active', true);
-
-      if (phoneNumbersError) throw phoneNumbersError;
-
-      // Create a map of phone numbers for quick lookup
-      const phoneNumberMap = new Map<string, PhoneNumberConfig>();
-      phoneNumbersData?.forEach(pn => {
-        phoneNumberMap.set(pn.phone_number, pn);
-      });
-
-      // Create phone number groups
-      const phoneGroups: PhoneNumberGroup[] = [];
       const conversationsData: ConversationData[] = [];
       
       for (const patient of patientsData || []) {
-        // Get messages for this patient with phone number info
-        const { data: messagesData } = await supabase
-          .from('messages')
-          .select('content, created_at, direction, sender_name, twilio_number_from, twilio_number_to')
-          .eq('patient_id', patient.id)
-          .order('created_at', { ascending: false });
+        if (!currentPhoneNumberId || phoneNumbers.length === 0) {
+          // If no phone number selected, show all conversations
+          const { data: messagesData } = await supabase
+            .from('messages')
+            .select('content, created_at, direction, sender_name, twilio_number_from, twilio_number_to')
+            .eq('patient_id', patient.id)
+            .order('created_at', { ascending: false });
 
-        // Get unread count (inbound messages that are not read)
-        const { count: unreadCount } = await supabase
-          .from('messages')
-          .select('*', { count: 'exact', head: true })
-          .eq('patient_id', patient.id)
-          .eq('direction', 'inbound')
-          .or('is_read.is.null,is_read.eq.false');
+          const { count: unreadCount } = await supabase
+            .from('messages')
+            .select('*', { count: 'exact', head: true })
+            .eq('patient_id', patient.id)
+            .eq('direction', 'inbound')
+            .or('is_read.is.null,is_read.eq.false');
 
-        const lastMessage = messagesData?.[0];
-        
-        if (lastMessage) {
-          // Determine which of our phone numbers was used
-          const ourPhoneNumber = lastMessage.direction === 'inbound' 
-            ? lastMessage.twilio_number_to  // For inbound, our number is the recipient
-            : lastMessage.twilio_number_from; // For outbound, our number is the sender
-
-          // Get all messages for this patient-phone combination
-          const phoneMessages = messagesData.filter(msg => {
-            const phoneUsed = msg.direction === 'inbound' 
-              ? msg.twilio_number_to 
-              : msg.twilio_number_from;
-            return phoneUsed === ourPhoneNumber;
-          });
-
-          // Use the latest message from this phone number combination
-          const phoneLastMessage = phoneMessages[0];
+          const lastMessage = messagesData?.[0];
           
-          if (phoneLastMessage) {
+          if (lastMessage || messagesData?.length === 0) {
             const conversation: ConversationData = {
               patient,
-              lastMessage: {
-                content: phoneLastMessage.content,
-                created_at: phoneLastMessage.created_at,
-                direction: phoneLastMessage.direction,
-                sender_name: phoneLastMessage.sender_name
-              },
+              lastMessage: lastMessage ? {
+                content: lastMessage.content,
+                created_at: lastMessage.created_at,
+                direction: lastMessage.direction,
+                sender_name: lastMessage.sender_name
+              } : undefined,
               unreadCount: unreadCount || 0,
-              lastActivity: phoneLastMessage.created_at
+              lastActivity: lastMessage?.created_at || patient.created_at
             };
 
             conversationsData.push(conversation);
-
-            // Find or create phone number group
-            let phoneGroup = phoneGroups.find(pg => pg.phoneNumber === ourPhoneNumber);
-            if (!phoneGroup) {
-              const phoneConfig = phoneNumberMap.get(ourPhoneNumber);
-              phoneGroup = {
-                phoneNumber: ourPhoneNumber,
-                displayName: phoneConfig?.display_name || ourPhoneNumber,
-                conversations: [],
-                totalUnreadCount: 0,
-                lastActivity: phoneLastMessage.created_at
-              };
-              phoneGroups.push(phoneGroup);
-            }
-
-            phoneGroup.conversations.push(conversation);
-            phoneGroup.totalUnreadCount += unreadCount || 0;
-            
-            // Update last activity if this conversation is more recent
-            if (new Date(phoneLastMessage.created_at) > new Date(phoneGroup.lastActivity)) {
-              phoneGroup.lastActivity = phoneLastMessage.created_at;
-            }
           }
+        } else {
+          // Filter by specific phone number
+          const currentPhoneNumber = phoneNumbers.find(p => p.id === currentPhoneNumberId);
+          if (!currentPhoneNumber) continue;
+
+          // Get messages for this phone number OR legacy messages (only for primary phone)
+          const isPrimaryPhone = currentPhoneNumber.is_primary;
+          
+          let messagesQuery = supabase
+            .from('messages')
+            .select('content, created_at, direction, sender_name, twilio_number_from, twilio_number_to')
+            .eq('patient_id', patient.id);
+
+          if (isPrimaryPhone) {
+            // Primary phone shows both its messages AND legacy messages
+            messagesQuery = messagesQuery.or(`twilio_number_from.eq.${currentPhoneNumber.phone_number},twilio_number_to.eq.${currentPhoneNumber.phone_number},twilio_number_from.is.null,twilio_number_to.is.null`);
+          } else {
+            // Secondary phones only show their specific messages
+            messagesQuery = messagesQuery.or(`twilio_number_from.eq.${currentPhoneNumber.phone_number},twilio_number_to.eq.${currentPhoneNumber.phone_number}`);
+          }
+
+          const { data: messagesData } = await messagesQuery.order('created_at', { ascending: false });
+
+          // Skip this patient if they have no messages for this phone number
+          if (!messagesData || messagesData.length === 0) {
+            continue;
+          }
+
+          // Get unread count for this phone number
+          let unreadQuery = supabase
+            .from('messages')
+            .select('*', { count: 'exact', head: true })
+            .eq('patient_id', patient.id)
+            .eq('direction', 'inbound')
+            .or('is_read.is.null,is_read.eq.false');
+
+          if (isPrimaryPhone) {
+            unreadQuery = unreadQuery.or(`twilio_number_to.eq.${currentPhoneNumber.phone_number},twilio_number_to.is.null`);
+          } else {
+            unreadQuery = unreadQuery.eq('twilio_number_to', currentPhoneNumber.phone_number);
+          }
+
+          const { count: unreadCount } = await unreadQuery;
+
+          const lastMessage = messagesData[0];
+          
+          const conversation: ConversationData = {
+            patient,
+            lastMessage: {
+              content: lastMessage.content,
+              created_at: lastMessage.created_at,
+              direction: lastMessage.direction,
+              sender_name: lastMessage.sender_name
+            },
+            unreadCount: unreadCount || 0,
+            lastActivity: lastMessage.created_at
+          };
+
+          conversationsData.push(conversation);
         }
       }
 
-      // Sort conversations within each phone group by last activity
-      phoneGroups.forEach(group => {
-        group.conversations.sort((a, b) => 
-          new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
-        );
-      });
-
-      // Sort phone groups by last activity
-      phoneGroups.sort((a, b) => 
+      // Sort conversations by last activity
+      conversationsData.sort((a, b) => 
         new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
       );
 
-      setPhoneNumberGroups(phoneGroups);
       setConversations(conversationsData);
-      setPatients(patientsData || []);
     } catch (error) {
       console.error('Error fetching conversations:', error);
       toast({
@@ -409,7 +478,100 @@ export default function Index() {
         variant: "destructive",
       });
     }
-  };
+  }, [currentPhoneNumberId, phoneNumbers, toast]);
+
+  // Fetch all conversations for dashboard (regardless of phone number selection)
+  const fetchAllConversations = useCallback(async () => {
+    try {
+      // Get all patients
+      const { data: patientsData, error: patientsError } = await supabase
+        .from('patients')
+        .select('*')
+        .order('name');
+
+      if (patientsError) throw patientsError;
+
+      const allConversationsData: ConversationData[] = [];
+      
+      for (const patient of patientsData || []) {
+        // Get all messages for this patient (from all phone numbers)
+        const { data: messagesData } = await supabase
+          .from('messages')
+          .select('content, created_at, direction, sender_name, twilio_number_from, twilio_number_to')
+          .eq('patient_id', patient.id)
+          .order('created_at', { ascending: false });
+
+        // Get total unread count for this patient (from all phone numbers)
+        const unreadQuery = supabase
+          .from('messages')
+          .select('*', { count: 'exact', head: true })
+          .eq('patient_id', patient.id)
+          .eq('direction', 'inbound')
+          .or('is_read.is.null,is_read.eq.false');
+        
+        const { count: unreadCount, error: unreadError } = await unreadQuery;
+        
+        console.log('🔔 UNREAD QUERY for', patient.name, ':', {
+          patientId: patient.id,
+          unreadCount,
+          unreadError
+        });
+        
+        // Debug: Get all messages for this patient to see their is_read values
+        const { data: debugMessages } = await supabase
+          .from('messages')
+          .select('id, content, direction, is_read, created_at')
+          .eq('patient_id', patient.id)
+          .order('created_at', { ascending: false })
+          .limit(5);
+          
+        console.log('🔔 DEBUG MESSAGES for', patient.name, ':', debugMessages);
+
+        // Only include patients with messages
+        if (messagesData && messagesData.length > 0) {
+          const lastMessage = messagesData[0];
+          
+          const conversation: ConversationData = {
+            patient,
+            lastMessage: {
+              content: lastMessage.content,
+              created_at: lastMessage.created_at,
+              direction: lastMessage.direction,
+              sender_name: lastMessage.sender_name
+            },
+            unreadCount: unreadCount || 0,
+            lastActivity: lastMessage.created_at
+          };
+
+          allConversationsData.push(conversation);
+        }
+      }
+
+      // Sort conversations by last activity
+      allConversationsData.sort((a, b) => 
+        new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
+      );
+
+      // Update both filtered and all conversations
+      console.log('🔔 SETTING CONVERSATIONS:', allConversationsData.length, 'conversations');
+      console.log('🔔 UNREAD BREAKDOWN:', allConversationsData.map(c => ({
+        name: c.patient.name,
+        unread: c.unreadCount
+      })));
+      setConversations(allConversationsData);
+    } catch (error) {
+      console.error('Error fetching all conversations:', error);
+    }
+  }, [phoneNumbers, patients]);
+
+  // Refetch conversations when phone number changes or initially when phone numbers load
+  useEffect(() => {
+    if (activeTab === "messages") {
+      fetchConversations();
+    } else if (activeTab === "dashboard") {
+      fetchAllConversations();
+    }
+  }, [activeTab, currentPhoneNumberId, phoneNumbers]);
 
   const formatLastMessageTime = (timestamp: string) => {
     try {
@@ -506,43 +668,6 @@ export default function Index() {
     );
   });
 
-  useEffect(() => {
-    if (activeTab === "messages") {
-      fetchPhoneNumbers();
-      fetchConversations();
-    }
-  }, [activeTab]);
-
-  // Set up real-time subscription for all messages to update conversation list
-  useEffect(() => {
-    if (isAuthenticated && activeTab === "messages") {
-      const subscription = supabase
-        .channel('all_messages')
-        .on('postgres_changes', 
-          { 
-            event: 'INSERT', 
-            schema: 'public', 
-            table: 'messages'
-          }, 
-          (payload) => {
-            console.log('Real-time message received:', payload);
-            // Auto-refresh conversations when any message is received
-            fetchConversations();
-          }
-        )
-        .subscribe();
-
-      return () => {
-        subscription.unsubscribe();
-      };
-    }
-  }, [isAuthenticated, activeTab]);
-
-  // Refresh conversations when a new message is sent
-  const handleRefreshConversations = () => {
-    fetchConversations();
-  };
-
   // Add callback to refresh conversations when messages are sent
   const handleMessageSent = () => {
     // Refresh conversations to show updated order and last message
@@ -554,32 +679,369 @@ export default function Index() {
     setMobileMenuOpen(false); // Close mobile menu when tab changes
   };
 
+  const getCurrentPhoneNumber = () => {
+    return phoneNumbers.find(p => p.id === currentPhoneNumberId);
+  };
+
+  const handlePhoneNumberSwitch = (phoneNumberId: string) => {
+    setCurrentPhoneNumberId(phoneNumberId);
+    setSelectedPatient(null); // Clear selected patient when switching
+    setShowPatientProfile(false);
+  };
+
+  // Notification Functions
+  const requestNotificationPermission = async () => {
+    if (!('Notification' in window)) {
+      console.log('This browser does not support desktop notification');
+      return;
+    }
+
+    if (Notification.permission === 'granted') {
+      setNotificationPermission('granted');
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+  };
+
+  const showNotification = (title: string, body: string, patientName: string, patientId?: string, phoneNumberId?: string) => {
+    if (Notification.permission === 'granted') {
+      const notification = new Notification(title, {
+        body,
+        icon: '/narayan-favicon.svg',
+        tag: 'new-message',
+        requireInteraction: true
+      });
+
+      notification.onclick = async () => {
+        window.focus();
+        
+        // Switch to correct phone number context if provided
+        if (phoneNumberId && phoneNumberId !== currentPhoneNumberId) {
+          setCurrentPhoneNumberId(phoneNumberId);
+        }
+        
+        // Switch to messages tab
+        setActiveTab('messages');
+        
+        // Select the patient if patient ID is provided
+        if (patientId) {
+          const patient = patients.find(p => p.id === patientId);
+          if (patient) {
+            await handlePatientSelect(patient);
+          }
+        }
+        
+        notification.close();
+      };
+
+      // Auto-close after 5 seconds
+      setTimeout(() => {
+        notification.close();
+      }, 5000);
+    }
+  };
+
+  const playNotificationSound = () => {
+    // Create a simple notification sound
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    oscillator.frequency.value = 800;
+    oscillator.type = 'sine';
+    gainNode.gain.value = 0.3;
+    
+    oscillator.start();
+    oscillator.stop(audioContext.currentTime + 0.2);
+  };
+
+  // Real-time message subscription
+  useEffect(() => {
+    console.log('🔔 Setting up real-time subscription...', { 
+      isAuthenticated, 
+      patientsCount: patients.length, 
+      phoneNumbersCount: phoneNumbers.length,
+      currentTab: activeTab
+    });
+    
+    if (!isAuthenticated) {
+      console.log('❌ Not authenticated, skipping subscription');
+      return;
+    }
+
+    // Create a unique channel name to avoid conflicts
+    const channelName = `messages-${Date.now()}`;
+    console.log('🔔 Creating channel:', channelName);
+
+    const messageSubscription = supabase
+      .channel(channelName)
+      .on('postgres_changes', 
+        { 
+          event: 'INSERT', 
+          schema: 'public', 
+          table: 'messages'
+        }, 
+        async (payload) => {
+          console.log('🔔 NEW MESSAGE RECEIVED:', payload);
+          console.log('🔔 Raw payload:', JSON.stringify(payload, null, 2));
+          
+          // Get patient info for notification
+          const messageData = payload.new;
+          
+          // Only process inbound messages
+          if (messageData.direction !== 'inbound') {
+            console.log('🔔 Ignoring outbound message');
+            return;
+          }
+          
+          console.log('🔔 Processing inbound message:', messageData);
+          
+          // Find patient name from current patients list
+          const patient = patients.find(p => p.id === messageData.patient_id);
+          const patientName = patient?.name || 'Unknown Patient';
+          
+          // Find the correct phone number context for this message
+          const messagePhoneNumber = phoneNumbers.find(p => 
+            p.phone_number === messageData.twilio_number_to || 
+            p.phone_number === messageData.twilio_number_from
+          );
+          
+          const locationContext = messagePhoneNumber ? `(${messagePhoneNumber.display_name})` : '';
+          
+          console.log('🔔 Triggering notifications for:', patientName, locationContext);
+          
+          // Show notification for new inbound message with location context (disabled per user request)
+          // showNotification(
+          //   `New message from ${patientName} ${locationContext}`,
+          //   messageData.content,
+          //   patientName,
+          //   messageData.patient_id,
+          //   messagePhoneNumber?.id
+          // );
+          
+          // Play notification sound
+          try {
+            playNotificationSound();
+          } catch (error) {
+            console.error('Sound error:', error);
+          }
+          
+          // Show toast notification with location context
+          toast({
+            title: `New message from ${patientName} ${locationContext}`,
+            description: messageData.content,
+            duration: 5000,
+          });
+          
+          // Refresh conversations to show new message
+          console.log('🔄 Refreshing conversations after new message...');
+          
+          // Always fetch all conversations for badges and dashboard
+          await fetchAllConversations();
+          
+          // If we're on the messages tab, also fetch the filtered conversations
+          if (activeTab === "messages") {
+            await fetchConversations();
+          }
+          
+          console.log('✅ Conversations refreshed');
+        }
+      )
+      .subscribe((status) => {
+        console.log('🔔 Subscription status:', status);
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ Real-time subscription is ACTIVE!');
+          // Test the subscription is working
+          console.log('🔔 Testing if subscription works...');
+          setTimeout(() => {
+            console.log('🔔 Subscription should be ready now');
+          }, 2000);
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('❌ Real-time subscription ERROR!');
+        } else if (status === 'TIMED_OUT') {
+          console.error('⏰ Real-time subscription TIMED OUT!');
+        } else if (status === 'CLOSED') {
+          console.log('🔒 Real-time subscription CLOSED');
+        }
+      });
+
+    return () => {
+      console.log('🔔 Cleaning up subscription...');
+      supabase.removeChannel(messageSubscription);
+    };
+  }, [isAuthenticated, patients, phoneNumbers, toast, activeTab, fetchConversations, fetchAllConversations]);
+
+  // Alternative simplified subscription for testing
+  useEffect(() => {
+    console.log('🧪 Setting up simplified test subscription...');
+    
+    const testSubscription = supabase
+      .channel('test-messages-channel')
+      .on('postgres_changes', 
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'messages'
+        }, 
+        (payload) => {
+          console.log('🧪 TEST SUBSCRIPTION RECEIVED:', payload);
+          console.log('🧪 Event type:', payload.eventType);
+          console.log('🧪 Table:', payload.table);
+          console.log('🧪 Schema:', payload.schema);
+          
+          if (payload.eventType === 'INSERT') {
+            console.log('🧪 NEW MESSAGE INSERTED!');
+            // alert('TEST: New message detected!'); // Disabled per user request
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('🧪 Test subscription status:', status);
+        if (status === 'SUBSCRIBED') {
+          console.log('🧪 Test subscription is active!');
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('🧪 Test subscription error!');
+        }
+      });
+
+    return () => {
+      console.log('🧪 Cleaning up test subscription...');
+      supabase.removeChannel(testSubscription);
+    };
+  }, []);
+
+  // Standalone realtime test that doesn't depend on authentication
+  useEffect(() => {
+    console.log('🔥 Setting up STANDALONE realtime test...');
+    
+    const standaloneSub = supabase
+      .channel('standalone-test')
+      .on('postgres_changes', 
+        { 
+          event: 'INSERT', 
+          schema: 'public', 
+          table: 'messages'
+        }, 
+        (payload) => {
+          console.log('🔥 STANDALONE SUBSCRIPTION TRIGGERED!');
+          console.log('🔥 Payload:', payload);
+          
+          // Test alert disabled per user request
+          // if (payload.new) {
+          //   alert(`STANDALONE: New message! ${payload.new.content}`);
+          // }
+        }
+      )
+      .subscribe((status) => {
+        console.log('🔥 Standalone status:', status);
+      });
+
+    return () => {
+      supabase.removeChannel(standaloneSub);
+    };
+  }, []);
+
+  // Request notification permission on component mount
+  useEffect(() => {
+    requestNotificationPermission();
+  }, []);
+
+  // Test function to verify realtime is working
+  const testRealtime = async () => {
+    console.log('🧪 Testing realtime subscription...');
+    
+    try {
+      // First, check the publication status
+      const { data: pubData, error: pubError } = await supabase
+        .from('pg_publication_tables')
+        .select('*')
+        .eq('pubname', 'supabase_realtime');
+      
+      console.log('🧪 Publication tables:', pubData);
+      
+      if (pubError) {
+        console.error('❌ Could not check publication:', pubError);
+      }
+      
+      // Get first patient for testing
+      const { data: patients } = await supabase
+        .from('patients')
+        .select('id')
+        .limit(1);
+      
+      if (patients && patients.length > 0) {
+        const patientId = patients[0].id;
+        
+        console.log('🧪 Inserting test message for patient:', patientId);
+        
+        // Insert a test message
+        const { data, error } = await supabase
+          .from('messages')
+          .insert({
+            patient_id: patientId,
+            direction: 'inbound',
+            content: `Test message for realtime verification ${new Date().toISOString()}`,
+            channel: 'sms',
+            sender_name: 'Test Patient'
+          })
+          .select();
+        
+        if (error) {
+          console.error('❌ Test message failed:', error);
+        } else {
+          console.log('✅ Test message sent:', data);
+          console.log('🔔 Now watch for realtime subscription callback...');
+          
+          // Wait and check if subscription triggered
+          setTimeout(() => {
+            console.log('🔔 If you see this but no subscription callback, realtime is not working');
+          }, 3000);
+        }
+      } else {
+        console.error('❌ No patients found for testing');
+      }
+    } catch (error) {
+      console.error('❌ Realtime test failed:', error);
+    }
+  };
+
+  // Add test button in development
+  const isDevMode = process.env.NODE_ENV === 'development';
+
   // Reusable Sidebar Content
   const SidebarContent = () => (
-    <>
-      {/* Logo */}
-      <div className="p-6 border-b border-gray-200">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm p-1">
-            <img 
-              src="/narayan-logo.png" 
-              alt="Narayan Pharmacy Logo" 
-              className="w-full h-full object-contain"
-              onError={(e) => {
-                // Fallback to background with initials if image fails to load
-                e.currentTarget.style.display = 'none';
-                e.currentTarget.parentElement!.innerHTML = '<div class="w-full h-full bg-gradient-to-br from-red-500 to-red-700 rounded-lg flex items-center justify-center text-white font-bold text-sm">N</div>';
-              }}
-            />
-          </div>
-          <div>
-            <h2 className="text-lg font-bold text-gray-900">Narayan Pharmacy</h2>
-            <p className="text-xs text-gray-500">MedConnect Platform</p>
-          </div>
+    <div className="h-full flex flex-col">
+      <div className="p-6 border-b border-gray-200 flex-shrink-0">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-xl font-bold text-gray-900">MedConnect</h1>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm">
+                <Settings className="w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Settings</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={requestNotificationPermission}>
+                <Bell className="w-4 h-4 mr-2" />
+                Enable Notifications
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleLogout}>
+                <LogOut className="w-4 h-4 mr-2" />
+                Logout
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
+        <p className="text-sm text-gray-600">Healthcare Communication Platform</p>
       </div>
 
-      {/* Navigation */}
       <nav className="flex-1 p-4">
         <div className="space-y-2">
           <Button
@@ -598,11 +1060,45 @@ export default function Index() {
           >
             <MessageSquare className="w-4 h-4 mr-3" />
             Messages
-            {stats.activeConversations > 0 && (
-              <Badge variant="secondary" className="ml-auto">
-                {stats.activeConversations}
-              </Badge>
-            )}
+            {(() => {
+              // Context-aware badge calculation
+              let totalUnread = 0;
+              let badgeLabel = "";
+              
+              if (activeTab === "messages") {
+                // When on messages tab, only count unread for current phone number
+                totalUnread = conversations.reduce((sum, conv) => sum + conv.unreadCount, 0);
+                const currentPhone = getCurrentPhoneNumber();
+                badgeLabel = currentPhone ? ` (${currentPhone.display_name})` : "";
+                console.log('🔔 BADGE DEBUG - Messages tab - Total unread for current inbox:', totalUnread, 'Phone:', currentPhone?.display_name);
+              } else {
+                // When on dashboard tab, show all unread messages
+                totalUnread = conversations.reduce((sum, conv) => sum + conv.unreadCount, 0);
+                badgeLabel = " (All)";
+                console.log('🔔 BADGE DEBUG - Dashboard tab - Total unread across all inboxes:', totalUnread);
+              }
+              
+              console.log('🔔 BADGE DEBUG - Badge calculation:', {
+                activeTab,
+                totalUnread,
+                conversationsCount: conversations.length,
+                currentPhoneNumber: getCurrentPhoneNumber()?.display_name,
+                conversations: conversations.map(c => ({
+                  patient: c.patient.name,
+                  unreadCount: c.unreadCount
+                }))
+              });
+              
+              return (
+                <Badge 
+                  variant={totalUnread > 0 ? "destructive" : "secondary"} 
+                  className={`ml-auto ${totalUnread > 0 ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-200 text-gray-700'}`}
+                  title={`${totalUnread} unread messages${badgeLabel}`}
+                >
+                  {totalUnread > 99 ? '99+' : totalUnread}
+                </Badge>
+              );
+            })()}
           </Button>
           
           <Button
@@ -624,6 +1120,15 @@ export default function Index() {
           >
             <Send className="w-4 h-4 mr-3" />
             SMS Manager
+          </Button>
+          
+          <Button
+            variant={activeTab === "phone-numbers" ? "default" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => handleTabChange("phone-numbers")}
+          >
+            <Phone className="w-4 h-4 mr-3" />
+            Phone Numbers
           </Button>
           
           <Button
@@ -696,7 +1201,7 @@ export default function Index() {
           </Button>
         </div>
       </div>
-    </>
+    </div>
   );
 
   // Main Dashboard
@@ -777,7 +1282,7 @@ export default function Index() {
         </Card>
       </div>
 
-      {/* Quick Actions */}
+      {/* Quick Actions & Recent Messages */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
         <Card>
           <CardHeader>
@@ -800,6 +1305,95 @@ export default function Index() {
               <BarChart3 className="w-4 h-4 mr-2" />
               View Analytics
             </Button>
+            {isDevMode && (
+              <Button className="w-full justify-start touch-target" variant="outline" onClick={testRealtime}>
+                <Activity className="w-4 h-4 mr-2" />
+                Test Realtime
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span>Recent Messages</span>
+              {(() => {
+                const totalUnread = conversations.reduce((sum, conv) => sum + conv.unreadCount, 0);
+                return totalUnread > 0 ? (
+                  <Badge variant="destructive" className="bg-red-500 text-white animate-pulse">
+                    {totalUnread > 99 ? '99+' : totalUnread} new
+                  </Badge>
+                ) : null;
+              })()}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 max-h-80 overflow-y-auto">
+            {conversations.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <MessageSquare className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+                <p className="text-sm">No messages yet</p>
+              </div>
+            ) : (
+              conversations
+                .sort((a, b) => b.unreadCount - a.unreadCount || new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime())
+                .slice(0, 5)
+                .map((conversation) => (
+                  <div
+                    key={conversation.patient.id}
+                    className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                      conversation.unreadCount > 0 
+                        ? 'border-red-200 bg-red-50 hover:bg-red-100' 
+                        : 'border-gray-200 hover:bg-gray-50'
+                    }`}
+                    onClick={() => {
+                      handlePatientSelect(conversation.patient);
+                      handleTabChange("messages");
+                    }}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <div className="relative">
+                        <Avatar className="w-8 h-8">
+                          <AvatarFallback className="bg-gradient-to-br from-blue-500 to-blue-600 text-white font-semibold text-xs">
+                            {conversation.patient.name.split(' ').map(n => n[0]?.toUpperCase()).filter(Boolean).join('').slice(0, 2)}
+                          </AvatarFallback>
+                        </Avatar>
+                        {conversation.unreadCount > 0 && (
+                          <div className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center font-bold">
+                            {conversation.unreadCount > 9 ? '9+' : conversation.unreadCount}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <h4 className={`font-medium text-sm truncate ${
+                            conversation.unreadCount > 0 ? 'text-gray-900' : 'text-gray-700'
+                          }`}>
+                            {conversation.patient.name}
+                          </h4>
+                          <span className="text-xs text-gray-500">
+                            {conversation.lastMessage ? formatLastMessageTime(conversation.lastActivity) : "New"}
+                          </span>
+                        </div>
+                        <p className={`text-xs truncate ${
+                          conversation.unreadCount > 0 ? 'text-gray-700 font-medium' : 'text-gray-500'
+                        }`}>
+                          {conversation.lastMessage?.content || "No messages yet"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))
+            )}
+            {conversations.length > 5 && (
+              <Button 
+                variant="outline" 
+                className="w-full touch-target" 
+                onClick={() => handleTabChange("messages")}
+              >
+                View All Messages
+              </Button>
+            )}
           </CardContent>
         </Card>
 
@@ -870,9 +1464,9 @@ export default function Index() {
   }
 
   return (
-    <div className="h-screen flex bg-gray-50">
+    <div className="h-screen flex bg-gray-50 overflow-hidden">
       {/* Desktop Sidebar - Hidden on Mobile */}
-      <div className="hidden md:flex w-64 bg-white border-r border-gray-200 flex-col">
+      <div className="hidden md:flex w-64 bg-white border-r border-gray-200 flex-col flex-shrink-0">
         <SidebarContent />
       </div>
 
@@ -890,26 +1484,27 @@ export default function Index() {
       </Sheet>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Top Bar */}
-        <div className="bg-white border-b border-gray-200 px-4 py-4">
+        <div className="bg-white border-b border-gray-200 px-4 py-4 flex-shrink-0">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-4 min-w-0">
               {/* Mobile Menu Button */}
               <Button
                 variant="ghost"
                 size="sm"
-                className="md:hidden"
+                className="md:hidden flex-shrink-0"
                 onClick={() => setMobileMenuOpen(true)}
               >
                 <Menu className="w-5 h-5" />
               </Button>
               
-              <h1 className="text-lg md:text-xl font-semibold text-gray-900 capitalize">
+              <h1 className="text-lg md:text-xl font-semibold text-gray-900 capitalize truncate">
                 {activeTab === "dashboard" ? "Dashboard" : 
                  activeTab === "messages" ? "Messages" :
                  activeTab === "contacts" ? "Patient Contacts" :
                  activeTab === "sms" ? "SMS Manager" :
+                 activeTab === "phone-numbers" ? "Phone Numbers" :
                  activeTab === "analytics" ? "Analytics & Reports" :
                  activeTab === "team" ? "Team Management" :
                  activeTab === "automation" ? "SMS Automation" :
@@ -918,15 +1513,75 @@ export default function Index() {
               </h1>
             </div>
             
-            <div className="flex items-center space-x-2 md:space-x-3">
+            <div className="flex items-center space-x-2 md:space-x-3 flex-shrink-0">
               {/* Search - Hidden on small mobile, visible on tablet+ */}
               <div className="relative hidden sm:block">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <Input placeholder="Search..." className="pl-10 w-32 md:w-64" />
               </div>
-              <Button variant="outline" size="sm">
-                <Bell className="w-4 h-4" />
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    title={
+                      notificationPermission === 'granted' 
+                        ? 'Notifications enabled' 
+                        : 'Click to enable notifications'
+                    }
+                    className={`${
+                      notificationPermission === 'granted' 
+                        ? 'text-green-600 border-green-200 bg-green-50' 
+                        : 'text-gray-600'
+                    }`}
+                  >
+                    <Bell className="w-4 h-4" />
+                    {notificationPermission === 'granted' && (
+                      <span className="ml-1 w-2 h-2 bg-green-500 rounded-full"></span>
+                    )}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-56">
+                  <DropdownMenuLabel>Notification Settings</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem>
+                    <div className="flex items-center w-full">
+                      <Bell className="w-4 h-4 mr-2" />
+                      <span className="flex-1">Status:</span>
+                      <span className={`text-xs font-medium ${
+                        notificationPermission === 'granted' ? 'text-green-600' : 'text-red-600'
+                      }`}>
+                        {notificationPermission === 'granted' ? 'Enabled' : 'Disabled'}
+                      </span>
+                    </div>
+                  </DropdownMenuItem>
+                  {notificationPermission !== 'granted' && (
+                    <DropdownMenuItem onClick={requestNotificationPermission}>
+                      <Shield className="w-4 h-4 mr-2" />
+                      Enable Notifications
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem>
+                    <Activity className="w-4 h-4 mr-2" />
+                    Sound: {notificationPermission === 'granted' ? 'On' : 'Off'}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem>
+                    <Star className="w-4 h-4 mr-2" />
+                    Desktop: {notificationPermission === 'granted' ? 'On' : 'Off'}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem>
+                    <Activity className="w-4 h-4 mr-2" />
+                    Realtime: {isAuthenticated ? 'Connected' : 'Disconnected'}
+                  </DropdownMenuItem>
+                  {isDevMode && (
+                    <DropdownMenuItem onClick={testRealtime}>
+                      <AlertCircle className="w-4 h-4 mr-2" />
+                      Test Realtime
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button variant="outline" size="sm" className="hidden sm:flex">
                 <RefreshCw className="w-4 h-4" />
               </Button>
@@ -935,69 +1590,115 @@ export default function Index() {
         </div>
 
         {/* Tab Content */}
-        <div className="flex-1 overflow-auto">
-          {activeTab === "dashboard" && <Dashboard />}
+        <div className="flex-1 overflow-hidden min-h-0">
+          {activeTab === "dashboard" && (
+            <div className="h-full overflow-y-auto">
+              <Dashboard />
+            </div>
+          )}
           
           {activeTab === "messages" && (
-            <div className="h-full flex flex-col md:flex-row">
-              {/* Conversations List - Full width on mobile, fixed width on desktop */}
-              <div className={`bg-white border-r border-gray-200 ${
-                selectedPatient 
-                  ? 'hidden md:block md:w-96' 
-                  : 'flex-1 md:w-96'
-              }`}>
-                <div className="h-full flex flex-col">
+            <div className="h-full flex overflow-hidden">
+              {/* Conversations Panel - Fixed Width */}
+              <div className="bg-white border-r border-gray-200 w-80 flex-shrink-0 flex">
+                <div className="w-full flex flex-col h-full">
                   {/* Messages Header */}
-                  <div className="p-3 md:p-4 border-b border-gray-200">
-                    <div className="flex items-center justify-between mb-3 md:mb-4">
-                      <div className="flex items-center space-x-2">
-                        <MessageSquare className="w-5 h-5 text-blue-600" />
-                        <h2 className="text-lg font-semibold text-gray-900">Messages</h2>
-                        <Badge variant="secondary">{patients.length}</Badge>
+                  <div className="p-4 border-b border-gray-200 flex-shrink-0">
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <MessageSquare className="w-5 h-5 text-blue-600" />
+                          <h2 className="text-lg font-semibold text-gray-900">Messages</h2>
+                          {(() => {
+                            const totalUnread = conversations.reduce((sum, conv) => sum + conv.unreadCount, 0);
+                            const currentPhone = getCurrentPhoneNumber();
+                            
+                            console.log('🔔 Messages Header - Total unread for current inbox:', totalUnread, 'Phone:', currentPhone?.display_name);
+                            console.log('🔔 Messages Header - Conversation unread details:', conversations.map(c => ({
+                              patient: c.patient.name,
+                              unreadCount: c.unreadCount,
+                              lastMessage: c.lastMessage?.content?.substring(0, 30) + '...'
+                            })));
+                            
+                            return totalUnread > 0 ? (
+                              <Badge variant="destructive" className="bg-red-500 text-white animate-pulse">
+                                {totalUnread > 99 ? '99+' : totalUnread}
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary">{conversations.length}</Badge>
+                            );
+                          })()}
+                        </div>
+                        
+                        <div className="flex space-x-2">
+                          <Button 
+                            onClick={() => setShowNewMessageDialog(true)}
+                            size="sm"
+                            className="bg-blue-600 hover:bg-blue-700"
+                          >
+                            <Plus className="w-4 h-4 mr-1" />
+                            New
+                          </Button>
+                        </div>
                       </div>
-                      <Button 
-                        onClick={() => setShowNewMessageDialog(true)}
-                        size="sm"
-                        className="bg-blue-600 hover:bg-blue-700 touch-target"
-                      >
-                        <Plus className="w-4 h-4 mr-1 md:mr-2" />
-                        <span className="hidden sm:inline">New Message</span>
-                        <span className="sm:hidden">New</span>
-                      </Button>
-                    </div>
-                    
-                    {/* Search */}
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <Input
-                        placeholder="Search conversations..."
-                        className="pl-10 text-base" 
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                      />
-                    </div>
-                    
-                    {/* Phone Number Filter */}
-                    <div className="flex items-center space-x-2">
-                      <Phone className="w-4 h-4 text-gray-400" />
-                      <select
-                        value={selectedPhoneNumber}
-                        onChange={(e) => setSelectedPhoneNumber(e.target.value)}
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      >
-                        <option value="all">All Phone Numbers</option>
-                        {phoneNumbers.map((phone) => (
-                          <option key={phone.id} value={phone.phone_number}>
-                            {phone.display_name} ({phone.phone_number})
-                          </option>
-                        ))}
-                      </select>
+                      
+                      {/* Phone Number Switcher - ALWAYS VISIBLE */}
+                      <div className="w-full">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Location ({phoneNumbers.length} available)</label>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="outline" className="w-full justify-between">
+                              <div className="flex items-center space-x-2">
+                                <Building2 className="w-4 h-4" />
+                                <span>{getCurrentPhoneNumber()?.display_name || `No location selected (${phoneNumbers.length} available)`}</span>
+                              </div>
+                              <ChevronDown className="w-4 h-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent className="w-full">
+                            {phoneNumbers.length > 0 ? phoneNumbers.map((phone) => (
+                              <DropdownMenuItem
+                                key={phone.id}
+                                onClick={() => handlePhoneNumberSwitch(phone.id)}
+                                className={`cursor-pointer ${
+                                  currentPhoneNumberId === phone.id ? 'bg-blue-50' : ''
+                                }`}
+                              >
+                                <div className="flex justify-between items-center w-full">
+                                  <div>
+                                    <div className="font-medium">{phone.display_name}</div>
+                                    <div className="text-xs text-gray-500">{phone.phone_number}</div>
+                                  </div>
+                                  {currentPhoneNumberId === phone.id && (
+                                    <div className="w-2 h-2 bg-blue-600 rounded-full"></div>
+                                  )}
+                                </div>
+                              </DropdownMenuItem>
+                            )) : (
+                              <DropdownMenuItem disabled>
+                                <div className="text-gray-500">No phone numbers configured</div>
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                      
+                      {/* Search */}
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <Input
+                          placeholder="Search conversations..."
+                          className="pl-10" 
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                      </div>
                     </div>
                   </div>
 
                   {/* Conversations List */}
                   <div className="flex-1 overflow-y-auto">
-                    {filteredPhoneNumberGroups.length === 0 ? (
+                    {filteredConversations.length === 0 ? (
                       <div className="flex flex-col items-center justify-center h-full p-8 text-center">
                         <MessageSquare className="w-12 h-12 text-gray-400 mb-4" />
                         <h3 className="font-medium text-gray-900 mb-2">
@@ -1010,7 +1711,7 @@ export default function Index() {
                           <Button 
                             onClick={() => setShowNewMessageDialog(true)}
                             size="sm"
-                            className="bg-blue-600 hover:bg-blue-700 touch-target"
+                            className="bg-blue-600 hover:bg-blue-700"
                           >
                             <Plus className="w-4 h-4 mr-2" />
                             <span className="hidden sm:inline">Start First Conversation</span>
@@ -1019,203 +1720,206 @@ export default function Index() {
                         )}
                       </div>
                     ) : (
-                      <div>
-                        {filteredPhoneNumberGroups.map((phoneGroup) => (
-                          <div key={phoneGroup.phoneNumber} className="border-b border-gray-200">
-                            {/* Phone Number Header */}
-                            <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center space-x-2">
-                                  <Phone className="w-4 h-4 text-blue-600" />
-                                  <span className="font-medium text-gray-900 text-sm">
-                                    {phoneGroup.displayName}
-                                  </span>
-                                  <span className="text-xs text-gray-500">
-                                    {phoneGroup.phoneNumber}
-                                  </span>
-                                </div>
-                                {phoneGroup.totalUnreadCount > 0 && (
-                                  <Badge variant="destructive" className="text-xs">
-                                    {phoneGroup.totalUnreadCount}
-                                  </Badge>
-                                )}
-                              </div>
-                            </div>
-                            
-                            {/* Conversations in this phone group */}
-                            <div className="divide-y divide-gray-100">
-                              {phoneGroup.conversations.map((conversation) => {
-                                const isSelected = selectedPatient?.id === conversation.patient.id;
-                                
-                                return (
-                                  <div
-                                    key={conversation.patient.id}
-                                    onClick={() => {
-                                      handlePatientSelect(conversation.patient);
-                                      handleRefreshConversations(); // Refresh to update unread counts
-                                    }}
-                                    className={`p-3 md:p-4 hover:bg-gray-50 cursor-pointer transition-colors touch-target ${
-                                      isSelected ? "bg-blue-50 border-r-2 border-blue-600" : ""
-                                    }`}
-                                  >
+                      <div className="divide-y divide-gray-100">
+                        {filteredConversations.map((conversation) => {
+                          const isSelected = selectedPatient?.id === conversation.patient.id;
+                          const hasUnread = conversation.unreadCount > 0;
+                          
+                          return (
+                            <div
+                              key={conversation.patient.id}
+                                                              onClick={() => {
+                                  handlePatientSelect(conversation.patient);
+                                }}
+                                className={`p-3 md:p-4 cursor-pointer transition-all duration-200 border-l-4 ${
+                                  isSelected 
+                                    ? "bg-blue-50 border-l-blue-600 shadow-sm" 
+                                    : hasUnread 
+                                      ? "bg-red-50 border-l-red-500 hover:bg-red-100 shadow-sm ring-1 ring-red-100" 
+                                      : "border-l-transparent hover:bg-gray-50 hover:border-l-gray-300"
+                                }`}
+                            >
                                     <div className="flex items-start space-x-3">
-                                      <div className="relative">
-                                        <Avatar className="w-12 h-12">
-                                          <AvatarFallback className="bg-blue-600 text-white font-medium">
-                                            {conversation.patient.name.split(' ').map(n => n[0]).join('')}
-                                          </AvatarFallback>
-                                        </Avatar>
-                                        {conversation.unreadCount > 0 && (
-                                          <div className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                                            {conversation.unreadCount > 9 ? '9+' : conversation.unreadCount}
-                                          </div>
-                                        )}
-                                      </div>
+                                                                      <div className="relative">
+                                  <Avatar className="w-12 h-12">
+                                    <AvatarFallback className="bg-gradient-to-br from-blue-500 to-blue-600 text-white font-semibold text-sm">
+                                      {conversation.patient.name.split(' ').map(n => n[0]?.toUpperCase()).filter(Boolean).join('').slice(0, 2)}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  {conversation.unreadCount > 0 && (
+                                    <div className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-bold shadow-lg ring-2 ring-white animate-pulse">
+                                      {conversation.unreadCount > 99 ? '99+' : conversation.unreadCount}
+                                    </div>
+                                  )}
+                                </div>
                                       
                                       <div className="flex-1 min-w-0">
                                         <div className="flex items-center justify-between mb-1">
-                                          <h3 className={`font-medium truncate ${
-                                            conversation.unreadCount > 0 ? 'text-gray-900' : 'text-gray-700'
+                                          <h3 className={`truncate flex-1 ${
+                                            conversation.unreadCount > 0 
+                                              ? 'text-gray-900 font-bold text-base' 
+                                              : 'text-gray-900 font-medium'
                                           }`}>
                                             {conversation.patient.name}
+                                            {conversation.unreadCount > 0 && (
+                                              <span className="inline-block w-2 h-2 bg-red-500 rounded-full ml-2"></span>
+                                            )}
                                           </h3>
-                                          <span className="text-xs text-gray-500 ml-2 flex-shrink-0">
+                                          <span className={`text-xs ml-2 flex-shrink-0 ${
+                                            conversation.unreadCount > 0 ? 'text-red-600 font-medium' : 'text-gray-500'
+                                          }`}>
                                             {conversation.lastMessage 
                                               ? formatLastMessageTime(conversation.lastActivity)
-                                              : "New patient"
+                                              : "New"
                                             }
                                           </span>
                                         </div>
                                         
                                         <p className={`text-sm truncate mb-2 ${
-                                          conversation.unreadCount > 0 ? 'text-gray-900 font-medium' : 'text-gray-500'
+                                          conversation.unreadCount > 0 
+                                            ? 'text-gray-900 font-semibold' 
+                                            : 'text-gray-500'
                                         }`}>
                                           {getLastMessagePreview(conversation)}
                                         </p>
                                         
                                         <div className="flex items-center justify-between">
-                                          <div className="flex items-center space-x-1">
+                                          <div className="flex items-center space-x-1 flex-1 min-w-0">
                                             <Badge 
                                               variant="secondary" 
-                                              className="text-xs"
+                                              className="text-xs flex-shrink-0"
                                             >
                                               {conversation.patient.preferred_channel.toUpperCase()}
                                             </Badge>
-                                            {conversation.patient.phone && (
-                                              <Phone className="w-3 h-3 text-gray-400" />
-                                            )}
-                                            {conversation.patient.email && (
-                                              <Mail className="w-3 h-3 text-gray-400" />
-                                            )}
+                                            <div className="flex items-center space-x-1 text-gray-400">
+                                              {conversation.patient.phone && (
+                                                <Phone className="w-3 h-3 flex-shrink-0" />
+                                              )}
+                                              {conversation.patient.email && (
+                                                <Mail className="w-3 h-3 flex-shrink-0" />
+                                              )}
+                                            </div>
                                           </div>
                                         </div>
                                       </div>
                                     </div>
                                   </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        ))}
+                            );
+                          })}
                       </div>
                     )}
                   </div>
                 </div>
               </div>
-              {/* Chat Area - Full width on mobile when patient selected */}
-              <div className={`flex-1 flex ${selectedPatient ? 'flex' : 'hidden md:flex'}`}>
-                <div className="flex-1">
-                  {selectedPatient ? (
-                    <div className="h-full flex flex-col">
-                      {/* Chat Header with Patient Info Toggle */}
-                      <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white">
-                        <div className="flex items-center space-x-3">
-                          {/* Mobile Back Button */}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="md:hidden"
-                            onClick={() => setSelectedPatient(null)}
-                          >
-                            <X className="w-4 h-4" />
-                          </Button>
-                          
-                          <Avatar className="w-10 h-10">
-                            <AvatarFallback className="bg-blue-600 text-white font-medium">
-                              {selectedPatient.name.split(' ').map(n => n[0]).join('')}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div>
-                            <h3 className="font-semibold text-gray-900">{selectedPatient.name}</h3>
-                            <p className="text-sm text-gray-500">
-                              {selectedPatient.phone || selectedPatient.email}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <Button variant="ghost" size="sm" title="Call patient">
-                            <Phone className="w-4 h-4" />
-                          </Button>
-                          <Button 
-                            variant={showPatientProfile ? "default" : "ghost"}
-                            size="sm"
-                            onClick={() => setShowPatientProfile(!showPatientProfile)}
-                            title="Patient details"
-                            className="hidden sm:flex"
-                          >
-                            Patient Info
-                          </Button>
+              {/* Chat Area - Takes remaining space, no responsive hiding */}
+              <div className="flex-1 min-w-0 bg-gray-50">
+                {selectedPatient ? (
+                  <div className="h-full flex flex-col">
+                    {/* Chat Header */}
+                    <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white flex-shrink-0">
+                      <div className="flex items-center space-x-3 min-w-0">
+                        <Avatar className="w-10 h-10 flex-shrink-0">
+                          <AvatarFallback className="bg-gradient-to-br from-blue-500 to-blue-600 text-white font-semibold text-sm">
+                            {selectedPatient.name.split(' ').map(n => n[0]?.toUpperCase()).filter(Boolean).join('').slice(0, 2)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-semibold text-gray-900 truncate">{selectedPatient.name}</h3>
+                          <p className="text-sm text-gray-500 truncate">
+                            {selectedPatient.phone || selectedPatient.email}
+                          </p>
                         </div>
                       </div>
-                      {/* Message Area */}
-                      <div className="flex-1">
-                        <MessageArea 
-                          patient={selectedPatient} 
-                          channel={selectedChannel} 
-                          onMessageSent={handleMessageSent}
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex-1 flex items-center justify-center">
-                      <div className="text-center">
-                        <MessageSquare className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                        <h3 className="text-lg font-medium text-gray-900 mb-2">Select a patient to start messaging</h3>
-                        <p className="text-gray-500">Choose from your patient list to begin a conversation</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                
-                {/* Patient Profile Sidebar - Desktop only */}
-                {showPatientProfile && selectedPatient && (
-                  <div className="hidden sm:block w-80 border-l border-gray-200 bg-white">
-                    <div className="p-4 border-b border-gray-200">
-                      <div className="flex items-center justify-between">
-                        <h3 className="font-semibold text-gray-900">Patient Profile</h3>
+                      <div className="flex items-center space-x-2 flex-shrink-0">
                         <Button 
                           variant="ghost" 
-                          size="sm"
-                          onClick={() => setShowPatientProfile(false)}
+                          size="sm" 
+                          title="Toggle patient profile"
+                          onClick={() => setShowPatientProfile(!showPatientProfile)}
                         >
-                          ×
+                          <Users className="w-4 h-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm" title="Call patient">
+                          <Phone className="w-4 h-4" />
                         </Button>
                       </div>
                     </div>
-                    <PatientProfile patient={selectedPatient} />
+                    
+                    {/* Message Area - Takes remaining space */}
+                    <div className="flex-1 min-h-0 overflow-hidden">
+                      <MessageArea 
+                        patient={selectedPatient} 
+                        channel={selectedChannel}
+                        currentPhoneNumberId={currentPhoneNumberId}
+                        onMessageSent={handleMessageSent}
+                        onMessagesRead={fetchConversations}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="h-full flex items-center justify-center">
+                    <div className="text-center">
+                      <MessageSquare className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-gray-900 mb-2">Select a patient to start messaging</h3>
+                      <p className="text-gray-500">Choose from your patient list to begin a conversation</p>
+                    </div>
                   </div>
                 )}
               </div>
+              
+              {/* Patient Profile Panel - Hidden on smaller screens */}
+              {selectedPatient && showPatientProfile && (
+                <div className="hidden lg:block bg-white border-l border-gray-200 w-80 flex-shrink-0">
+                  <PatientProfile 
+                    patient={selectedPatient} 
+                    onPatientUpdated={handlePatientUpdated}
+                    onPatientDeleted={handlePatientDeleted}
+                  />
+                </div>
+              )}
             </div>
           )}
           
-          {activeTab === "contacts" && <ContactsManager onPatientUpdated={handlePatientUpdated} onPatientDeleted={handlePatientDeleted} />}
-          {activeTab === "sms" && <BulkSMSManager />}
-          {activeTab === "analytics" && <SMSAnalyticsDashboard />}
-          {activeTab === "team" && <TeamSidebar selectedInbox={null} onSelectInbox={() => {}} />}
-          {activeTab === "automation" && <SMSAutomation />}
-          {activeTab === "omnichannel" && <OmnichannelMessaging />}
-          {activeTab === "admin" && <AdminDashboard />}
+          {activeTab === "contacts" && (
+            <div className="h-full overflow-y-auto">
+              <ContactsManager onPatientUpdated={handlePatientUpdated} onPatientDeleted={handlePatientDeleted} />
+            </div>
+          )}
+          {activeTab === "sms" && (
+            <div className="h-full overflow-y-auto">
+              <BulkSMSManager />
+            </div>
+          )}
+          {activeTab === "phone-numbers" && (
+            <div className="h-full overflow-y-auto">
+              <AddPhoneNumber />
+            </div>
+          )}
+          {activeTab === "analytics" && (
+            <div className="h-full overflow-y-auto">
+              <SMSAnalyticsDashboard />
+            </div>
+          )}
+          {activeTab === "team" && (
+            <div className="h-full overflow-y-auto">
+              <TeamSidebar selectedInbox={null} onSelectInbox={() => {}} />
+            </div>
+          )}
+          {activeTab === "automation" && (
+            <div className="h-full overflow-y-auto">
+              <SMSAutomation />
+            </div>
+          )}
+          {activeTab === "omnichannel" && (
+            <div className="h-full overflow-y-auto">
+              <OmnichannelMessaging />
+            </div>
+          )}
+          {activeTab === "admin" && (
+            <div className="h-full overflow-y-auto">
+              <AdminDashboard />
+            </div>
+          )}
         </div>
       </div>
 

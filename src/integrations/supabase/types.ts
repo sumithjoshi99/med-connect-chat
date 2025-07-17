@@ -239,6 +239,10 @@ export interface Database {
           created_at: string
           updated_at: string
           pharmacy_id: string | null
+          is_read: boolean | null
+          read_at: string | null
+          delivered_at: string | null
+          delivery_status: string | null
         }
         Insert: {
           id?: string
@@ -252,6 +256,10 @@ export interface Database {
           created_at?: string
           updated_at?: string
           pharmacy_id?: string | null
+          is_read?: boolean | null
+          read_at?: string | null
+          delivered_at?: string | null
+          delivery_status?: string | null
         }
         Update: {
           id?: string
@@ -265,6 +273,10 @@ export interface Database {
           created_at?: string
           updated_at?: string
           pharmacy_id?: string | null
+          is_read?: boolean | null
+          read_at?: string | null
+          delivered_at?: string | null
+          delivery_status?: string | null
         }
       }
     }
