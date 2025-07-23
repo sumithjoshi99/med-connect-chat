@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
+import { Textarea } from './ui/textarea';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { Badge } from './ui/badge';
 import { useToast } from './ui/use-toast';
@@ -441,14 +442,30 @@ export const MessageArea = ({ patient, channel, currentPhoneNumberId, onMessageS
       <div className="bg-white border-t border-gray-200 p-3 md:p-4 flex-shrink-0">
         <div className="flex items-end space-x-2 md:space-x-3">
           <div className="flex-1">
-            <Input
+            <Textarea
               value={newMessage}
               onChange={(e) => setNewMessage(e.target.value)}
-              onKeyPress={handleKeyPress}
+              onKeyDown={handleKeyPress}
               placeholder={`Send a message to ${patient.name}...`}
-              className="resize-none border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl text-base" 
+              className="resize-none border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl text-base min-h-[44px] max-h-[120px]" 
               disabled={isLoading}
+              rows={1}
             />
+            {/* Character Count */}
+            <div className="flex justify-between items-center mt-1 px-1">
+              <span className={`text-xs ${
+                newMessage.length > 140 ? 'text-orange-500' : 
+                newMessage.length > 160 ? 'text-red-500' : 
+                'text-gray-500'
+              }`}>
+                {newMessage.length}/160 characters
+              </span>
+              {channel === 'sms' && (
+                <span className="text-xs text-gray-500">
+                  {Math.ceil(newMessage.length / 160)} SMS part(s)
+                </span>
+              )}
+            </div>
           </div>
           <Button 
             onClick={triggerReadReceipts}

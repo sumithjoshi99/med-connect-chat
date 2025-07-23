@@ -62,6 +62,7 @@ interface PatientFormData {
   last_visit: string;
   next_appointment: string;
   notes: string;
+  location: string;
 }
 
 interface ContactsManagerProps {
@@ -74,6 +75,7 @@ export const ContactsManager = ({ onPatientUpdated, onPatientDeleted }: Contacts
   const [filteredPatients, setFilteredPatients] = useState<Patient[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedFilter, setSelectedFilter] = useState("all");
+  const [selectedLocation, setSelectedLocation] = useState("all");
   const [loading, setLoading] = useState(true);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showProfileDialog, setShowProfileDialog] = useState(false);
@@ -97,7 +99,8 @@ export const ContactsManager = ({ onPatientUpdated, onPatientDeleted }: Contacts
     insurance_provider: "",
     last_visit: "",
     next_appointment: "",
-    notes: ""
+    notes: "",
+    location: "mount_vernon"
   });
 
   // Edit patient form state
@@ -116,7 +119,8 @@ export const ContactsManager = ({ onPatientUpdated, onPatientDeleted }: Contacts
     insurance_provider: "",
     last_visit: "",
     next_appointment: "",
-    notes: ""
+    notes: "",
+    location: "mount_vernon"
   });
 
   useEffect(() => {
@@ -125,7 +129,7 @@ export const ContactsManager = ({ onPatientUpdated, onPatientDeleted }: Contacts
 
   useEffect(() => {
     filterPatients();
-  }, [patients, searchQuery, selectedFilter]);
+  }, [patients, searchQuery, selectedFilter, selectedLocation]);
 
   const loadPatients = async () => {
     setLoading(true);
@@ -162,6 +166,10 @@ export const ContactsManager = ({ onPatientUpdated, onPatientDeleted }: Contacts
 
     if (selectedFilter !== "all") {
       filtered = filtered.filter(patient => patient.status === selectedFilter);
+    }
+
+    if (selectedLocation !== "all") {
+      filtered = filtered.filter(patient => patient.location === selectedLocation);
     }
 
     setFilteredPatients(filtered);
@@ -226,6 +234,7 @@ export const ContactsManager = ({ onPatientUpdated, onPatientDeleted }: Contacts
           last_visit: newPatient.last_visit || null,
           next_appointment: newPatient.next_appointment || null,
           notes: newPatient.notes || null,
+          location: newPatient.location,
         }])
         .select()
         .single();
@@ -248,7 +257,8 @@ export const ContactsManager = ({ onPatientUpdated, onPatientDeleted }: Contacts
         insurance_provider: "",
         last_visit: "",
         next_appointment: "",
-        notes: ""
+        notes: "",
+        location: "mount_vernon"
       });
       setShowAddDialog(false);
 
@@ -297,6 +307,7 @@ export const ContactsManager = ({ onPatientUpdated, onPatientDeleted }: Contacts
           last_visit: editPatient.last_visit || null,
           next_appointment: editPatient.next_appointment || null,
           notes: editPatient.notes || null,
+          location: editPatient.location,
         })
         .eq('id', selectedPatient.id)
         .select()
@@ -376,7 +387,8 @@ export const ContactsManager = ({ onPatientUpdated, onPatientDeleted }: Contacts
       insurance_provider: patient.insurance_provider || "",
       last_visit: patient.last_visit || "",
       next_appointment: patient.next_appointment || "",
-      notes: patient.notes || ""
+      notes: patient.notes || "",
+      location: patient.location || "mount_vernon"
     });
     setIsEditing(false);
     setShowProfileDialog(true);
@@ -400,6 +412,8 @@ export const ContactsManager = ({ onPatientUpdated, onPatientDeleted }: Contacts
     active: patients.filter(p => p.status === 'active').length,
     inactive: patients.filter(p => p.status === 'inactive').length,
     blocked: patients.filter(p => p.status === 'blocked').length,
+    mount_vernon: patients.filter(p => p.location === 'mount_vernon').length,
+    new_rochelle: patients.filter(p => p.location === 'new_rochelle').length,
   };
 
   if (loading) {
@@ -436,7 +450,7 @@ export const ContactsManager = ({ onPatientUpdated, onPatientDeleted }: Contacts
 
       {/* Stats Cards */}
       <div className="p-6 border-b border-gray-200">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -487,6 +501,28 @@ export const ContactsManager = ({ onPatientUpdated, onPatientDeleted }: Contacts
               </div>
             </CardContent>
           </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Mount Vernon</p>
+                  <p className="text-2xl font-bold text-purple-600">{stats.mount_vernon}</p>
+                </div>
+                <MapPin className="w-8 h-8 text-purple-600" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">New Rochelle</p>
+                  <p className="text-2xl font-bold text-orange-600">{stats.new_rochelle}</p>
+                </div>
+                <MapPin className="w-8 h-8 text-orange-600" />
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
 
@@ -512,6 +548,17 @@ export const ContactsManager = ({ onPatientUpdated, onPatientDeleted }: Contacts
               <SelectItem value="active">Active</SelectItem>
               <SelectItem value="inactive">Inactive</SelectItem>
               <SelectItem value="blocked">Blocked</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={selectedLocation} onValueChange={setSelectedLocation}>
+            <SelectTrigger className="w-full sm:w-48">
+              <MapPin className="w-4 h-4 mr-2" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Locations</SelectItem>
+              <SelectItem value="mount_vernon">Mount Vernon</SelectItem>
+              <SelectItem value="new_rochelle">New Rochelle</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -556,9 +603,14 @@ export const ContactsManager = ({ onPatientUpdated, onPatientDeleted }: Contacts
                       </Avatar>
                       <div>
                         <h3 className="font-semibold text-gray-900">{patient.name}</h3>
-                        <Badge className={getStatusColor(patient.status)}>
-                          {patient.status}
-                        </Badge>
+                        <div className="flex gap-2 mt-1">
+                          <Badge className={getStatusColor(patient.status)}>
+                            {patient.status}
+                          </Badge>
+                          <Badge variant="outline" className="text-xs capitalize">
+                            {patient.location?.replace('_', ' ') || 'Not set'}
+                          </Badge>
+                        </div>
                       </div>
                     </div>
                     <DropdownMenu>
@@ -710,7 +762,7 @@ export const ContactsManager = ({ onPatientUpdated, onPatientDeleted }: Contacts
                 />
               </div>
               
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div>
                   <Label htmlFor="channel">Preferred Channel</Label>
                   <Select value={newPatient.preferred_channel} onValueChange={(value) => setNewPatient({...newPatient, preferred_channel: value})}>
@@ -734,6 +786,18 @@ export const ContactsManager = ({ onPatientUpdated, onPatientDeleted }: Contacts
                       <SelectItem value="active">Active</SelectItem>
                       <SelectItem value="inactive">Inactive</SelectItem>
                       <SelectItem value="blocked">Blocked</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="location">Location</Label>
+                  <Select value={newPatient.location} onValueChange={(value) => setNewPatient({...newPatient, location: value})}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="mount_vernon">Mount Vernon</SelectItem>
+                      <SelectItem value="new_rochelle">New Rochelle</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -958,7 +1022,7 @@ export const ContactsManager = ({ onPatientUpdated, onPatientDeleted }: Contacts
                   )}
                 </div>
                 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-4">
                   <div>
                     <Label>Preferred Channel</Label>
                     {isEditing ? (
@@ -992,6 +1056,24 @@ export const ContactsManager = ({ onPatientUpdated, onPatientDeleted }: Contacts
                     ) : (
                       <Badge className={getStatusColor(selectedPatient.status)}>
                         {selectedPatient.status}
+                      </Badge>
+                    )}
+                  </div>
+                  <div>
+                    <Label>Location</Label>
+                    {isEditing ? (
+                      <Select value={editPatient.location} onValueChange={(value) => setEditPatient({...editPatient, location: value})}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="mount_vernon">Mount Vernon</SelectItem>
+                          <SelectItem value="new_rochelle">New Rochelle</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Badge variant="outline" className="capitalize">
+                        {selectedPatient.location?.replace('_', ' ') || 'Not set'}
                       </Badge>
                     )}
                   </div>

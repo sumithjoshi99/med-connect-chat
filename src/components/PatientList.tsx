@@ -43,6 +43,7 @@ export const PatientList = ({ selectedPatient, onPatientSelect, onPatientAdded }
   const [patients, setPatients] = useState<Patient[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [locationFilter, setLocationFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const { toast } = useToast();
@@ -122,8 +123,9 @@ export const PatientList = ({ selectedPatient, onPatientSelect, onPatientAdded }
                          (patient.email && patient.email.toLowerCase().includes(searchTerm.toLowerCase()));
     
     const matchesStatus = statusFilter === "all" || patient.status === statusFilter;
+    const matchesLocation = locationFilter === "all" || patient.location === locationFilter;
     
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesStatus && matchesLocation;
   });
 
   const getChannelIcon = (channel: string) => {
@@ -191,12 +193,17 @@ export const PatientList = ({ selectedPatient, onPatientSelect, onPatientAdded }
                   <h3 className="font-semibold text-gray-900 truncate">
                     {patient.name}
                   </h3>
-                  <Badge 
-                    variant="outline" 
-                    className={cn("text-xs", getStatusColor(patient.status))}
-                  >
-                    {patient.status}
-                  </Badge>
+                  <div className="flex gap-1">
+                    <Badge 
+                      variant="outline" 
+                      className={cn("text-xs", getStatusColor(patient.status))}
+                    >
+                      {patient.status}
+                    </Badge>
+                    <Badge variant="outline" className="text-xs capitalize">
+                      {patient.location?.replace('_', ' ') || 'Not set'}
+                    </Badge>
+                  </div>
                 </div>
                 
                 <div className="space-y-1">
@@ -322,6 +329,26 @@ export const PatientList = ({ selectedPatient, onPatientSelect, onPatientAdded }
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setStatusFilter("pending")}>
                 Pending
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="min-w-fit">
+                <MapPin className="w-4 h-4 mr-2" />
+                {locationFilter === "all" ? "All Locations" : locationFilter.replace('_', ' ')}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setLocationFilter("all")}>
+                All Locations
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setLocationFilter("mount_vernon")}>
+                Mount Vernon
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setLocationFilter("new_rochelle")}>
+                New Rochelle
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

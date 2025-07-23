@@ -46,7 +46,8 @@ export const AddPatientDialog = ({ open, onOpenChange, onPatientAdded }: AddPati
     name: "",
     phone: "",
     email: "",
-    preferred_channel: "sms"
+    preferred_channel: "sms",
+    location: "mount_vernon"
   });
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -58,7 +59,8 @@ export const AddPatientDialog = ({ open, onOpenChange, onPatientAdded }: AddPati
       name: "",
       phone: "",
       email: "",
-      preferred_channel: "sms"
+      preferred_channel: "sms",
+      location: "mount_vernon"
     });
     setErrors({});
   };
@@ -185,7 +187,8 @@ export const AddPatientDialog = ({ open, onOpenChange, onPatientAdded }: AddPati
           phone: formattedPhone,
           email: formData.email.trim() || null,
           preferred_channel: formData.preferred_channel,
-          status: 'active'
+          status: 'active',
+          location: formData.location
         }])
         .select()
         .single();
@@ -377,57 +380,76 @@ export const AddPatientDialog = ({ open, onOpenChange, onPatientAdded }: AddPati
             )}
           </div>
 
-          {/* Preferred Channel */}
-          <div className="space-y-3">
-            <Label className="text-sm font-medium">Preferred Communication Channel</Label>
-            <Select 
-              value={formData.preferred_channel} 
-              onValueChange={(value) => handleInputChange('preferred_channel', value)}
-              disabled={loading}
-            >
-              <SelectTrigger className={cn(
-                "transition-all duration-200",
-                errors.preferred_channel 
-                  ? "border-red-500 focus:border-red-500 focus:ring-red-500" 
-                  : "focus:border-blue-500 focus:ring-blue-500"
-              )}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="sms">
-                  <div className="flex items-center space-x-2">
-                    <Phone className="w-4 h-4" />
-                    <span>SMS Text Messages</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="email">
-                  <div className="flex items-center space-x-2">
-                    <Mail className="w-4 h-4" />
-                    <span>Email</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="whatsapp">
-                  <div className="flex items-center space-x-2">
-                    <MessageSquare className="w-4 h-4" />
-                    <span>WhatsApp</span>
-                  </div>
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            
-            {formData.preferred_channel && (
-              <div className="flex items-center space-x-2 text-xs text-gray-600 bg-blue-50 p-2 rounded-md">
-                <Info className="w-3 h-3" />
-                <span>{getChannelRequirement(formData.preferred_channel)}</span>
-              </div>
-            )}
-            
-            {errors.preferred_channel && (
-              <div className="flex items-center space-x-1 text-sm text-red-600">
-                <AlertCircle className="w-3 h-3" />
-                <span>{errors.preferred_channel}</span>
-              </div>
-            )}
+          {/* Preferred Channel and Location */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-3">
+              <Label className="text-sm font-medium">Preferred Communication Channel</Label>
+              <Select 
+                value={formData.preferred_channel} 
+                onValueChange={(value) => handleInputChange('preferred_channel', value)}
+                disabled={loading}
+              >
+                <SelectTrigger className={cn(
+                  "transition-all duration-200",
+                  errors.preferred_channel 
+                    ? "border-red-500 focus:border-red-500 focus:ring-red-500" 
+                    : "focus:border-blue-500 focus:ring-blue-500"
+                )}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sms">
+                    <div className="flex items-center space-x-2">
+                      <Phone className="w-4 h-4" />
+                      <span>SMS Text Messages</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="email">
+                    <div className="flex items-center space-x-2">
+                      <Mail className="w-4 h-4" />
+                      <span>Email</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="whatsapp">
+                    <div className="flex items-center space-x-2">
+                      <MessageSquare className="w-4 h-4" />
+                      <span>WhatsApp</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              
+              {formData.preferred_channel && (
+                <div className="flex items-center space-x-2 text-xs text-gray-600 bg-blue-50 p-2 rounded-md">
+                  <Info className="w-3 h-3" />
+                  <span>{getChannelRequirement(formData.preferred_channel)}</span>
+                </div>
+              )}
+              
+              {errors.preferred_channel && (
+                <div className="flex items-center space-x-1 text-sm text-red-600">
+                  <AlertCircle className="w-3 h-3" />
+                  <span>{errors.preferred_channel}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <Label className="text-sm font-medium">Location</Label>
+              <Select 
+                value={formData.location} 
+                onValueChange={(value) => handleInputChange('location', value)}
+                disabled={loading}
+              >
+                <SelectTrigger className="transition-all duration-200 focus:border-blue-500 focus:ring-blue-500">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="mount_vernon">Mount Vernon</SelectItem>
+                  <SelectItem value="new_rochelle">New Rochelle</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <Separator />

@@ -65,6 +65,7 @@ export interface Database {
           next_appointment: string | null
           notes: string | null
           pharmacy_id: string | null
+          location: string
         }
         Insert: {
           id?: string
@@ -86,6 +87,7 @@ export interface Database {
           next_appointment?: string | null
           notes?: string | null
           pharmacy_id?: string | null
+          location?: string
         }
         Update: {
           id?: string
@@ -107,6 +109,7 @@ export interface Database {
           next_appointment?: string | null
           notes?: string | null
           pharmacy_id?: string | null
+          location?: string
         }
       }
       pharmacies: {

@@ -38,7 +38,8 @@ export const NewMessageDialog = ({
     name: "",
     phone: "",
     email: "",
-    preferred_channel: "sms"
+    preferred_channel: "sms",
+    location: "mount_vernon"
   });
 
   useEffect(() => {
@@ -123,6 +124,7 @@ export const NewMessageDialog = ({
           email: newPatient.email || null,
           preferred_channel: newPatient.preferred_channel,
           status: 'active',
+          location: newPatient.location,
         }])
         .select()
         .single();
@@ -138,7 +140,8 @@ export const NewMessageDialog = ({
         name: "",
         phone: "",
         email: "",
-        preferred_channel: "sms"
+        preferred_channel: "sms",
+        location: "mount_vernon"
       });
 
       toast({
@@ -229,9 +232,14 @@ export const NewMessageDialog = ({
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
                         <h3 className="font-medium text-gray-900 truncate">{patient.name}</h3>
-                        <Badge className={getStatusColor(patient.status)}>
-                          {patient.status}
-                        </Badge>
+                        <div className="flex gap-1">
+                          <Badge className={getStatusColor(patient.status)}>
+                            {patient.status}
+                          </Badge>
+                          <Badge variant="outline" className="text-xs capitalize">
+                            {patient.location?.replace('_', ' ') || 'Not set'}
+                          </Badge>
+                        </div>
                       </div>
                       
                       <div className="space-y-1">
@@ -294,21 +302,38 @@ export const NewMessageDialog = ({
                 </div>
               </div>
 
-              <div>
-                <Label htmlFor="channel">Preferred Communication Channel</Label>
-                <Select 
-                  value={newPatient.preferred_channel} 
-                  onValueChange={(value) => setNewPatient({...newPatient, preferred_channel: value})}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="sms">SMS</SelectItem>
-                    <SelectItem value="email">Email</SelectItem>
-                    <SelectItem value="phone">Phone</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="channel">Preferred Communication Channel</Label>
+                  <Select 
+                    value={newPatient.preferred_channel} 
+                    onValueChange={(value) => setNewPatient({...newPatient, preferred_channel: value})}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="sms">SMS</SelectItem>
+                      <SelectItem value="email">Email</SelectItem>
+                      <SelectItem value="phone">Phone</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="location">Location</Label>
+                  <Select 
+                    value={newPatient.location} 
+                    onValueChange={(value) => setNewPatient({...newPatient, location: value})}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="mount_vernon">Mount Vernon</SelectItem>
+                      <SelectItem value="new_rochelle">New Rochelle</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               <div className="flex justify-end space-x-2 pt-4">
