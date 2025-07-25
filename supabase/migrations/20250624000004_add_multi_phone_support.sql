@@ -68,7 +68,7 @@ INSERT INTO twilio_phone_numbers (
     '+19142221900',
     'Main Pharmacy Line',
     'AC956237533bdb4805ba26c3191c69a858',
-    'e6187747371082339e35d4347aab9294',
+    '467735fdc396abfca88f9992aae30dc5',
     true,
     true,
     'pharmacy',

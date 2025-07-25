@@ -36,7 +36,7 @@ export const AddPhoneNumber = () => {
           phone_number: '+19143657099',
           display_name: 'New Rochelle Location',
           twilio_account_sid: 'AC956237533bdb4805ba26c3191c69a858',
-          twilio_auth_token: 'e6187747371082339e35d4347aab9294',
+          twilio_auth_token: '467735fdc396abfca88f9992aae30dc5',
           is_active: true,
           is_primary: false,
           department: 'new_rochelle',
