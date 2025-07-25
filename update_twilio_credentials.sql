@@ -3,12 +3,12 @@
 
 -- Update main pharmacy line
 UPDATE twilio_phone_numbers 
-SET twilio_auth_token = '467735fdc396abfca88f9992aae30dc5'
+SET twilio_auth_token = 'f802bb79e17d6329077dab9e3070eeb2'
 WHERE phone_number = '+19142221900';
 
 -- Update New Rochelle location if it exists
 UPDATE twilio_phone_numbers 
-SET twilio_auth_token = '467735fdc396abfca88f9992aae30dc5'
+SET twilio_auth_token = 'f802bb79e17d6329077dab9e3070eeb2'
 WHERE phone_number = '+19143657099';
 
 -- Verify the updates
